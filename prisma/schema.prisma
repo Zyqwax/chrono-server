@@ -1,0 +1,174 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  MEMBER
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  SYSTEM
+  CALL
+}
+
+enum UserStatus {
+  ONLINE
+  IDLE
+  OFFLINE
+}
+
+/// DIRECT = birebir sohbet (DM), ROOM = sohbet odası
+enum RoomType {
+  DIRECT
+  ROOM
+}
+
+enum Visibility {
+  EVERYONE
+  CONTACTS
+  NOBODY
+}
+
+model User {
+  id           String     @id @default(uuid())
+  email        String     @unique
+  username     String     @unique
+  displayName  String
+  passwordHash String
+  avatarUrl    String?
+  avatarPublicId String?
+  avatarUpdateCount Int      @default(0)
+  avatarLastUpdatedAt DateTime?
+  bio          String?    @default("")
+  birthday     DateTime?
+  status       UserStatus @default(OFFLINE)
+  lastSeenAt   DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  createdRooms Room[]        @relation("RoomCreator")
+  memberships  RoomMember[]
+  messages     Message[]
+  settings     UserSettings?
+  contacts     Contact[]     @relation("ContactOwner")
+  contactOf    Contact[]     @relation("ContactTarget")
+
+  @@map("users")
+}
+
+model UserSettings {
+  userId String @id
+
+  // Gizlilik
+  lastSeenVisibility Visibility @default(EVERYONE)
+  avatarVisibility   Visibility @default(EVERYONE)
+  bioVisibility      Visibility @default(EVERYONE)
+  roomInviteVisibility Visibility @default(EVERYONE)
+  callVisibility     Visibility @default(EVERYONE)
+  readReceipts       Boolean    @default(true)
+
+  // Bildirimler
+  notifyPrivate  Boolean @default(true)
+  notifyRooms    Boolean @default(true)
+  notifyCalls    Boolean @default(true)
+  messagePreview Boolean @default(true)
+  inAppSounds    Boolean @default(true)
+  inAppVibrate   Boolean @default(true)
+
+  // Sohbet
+  messageTextSize Int     @default(16)
+  chatWallpaper   String  @default("default")
+  sendByEnter     Boolean @default(false)
+  timeFormat24h   Boolean @default(true)
+
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_settings")
+}
+
+model Contact {
+  id        String   @id @default(uuid())
+  ownerId   String
+  contactId String
+  nickname  String?
+  createdAt DateTime @default(now())
+
+  owner   User @relation("ContactOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  contact User @relation("ContactTarget", fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@unique([ownerId, contactId])
+  @@map("contacts")
+}
+
+model Room {
+  id            String    @id @default(uuid())
+  type          RoomType  @default(ROOM)
+  name          String?
+  iconUrl       String?
+  description   String?   @default("")
+  /// DM'ler için sıralı "userA_userB" anahtarı; aynı DM'in iki kez oluşmasını engeller
+  dmKey         String?   @unique
+  createdById   String
+  lastMessageAt DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  createdBy User         @relation("RoomCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  members   RoomMember[]
+  messages  Message[]
+
+  @@map("rooms")
+}
+
+model RoomMember {
+  id         String    @id @default(uuid())
+  roomId     String
+  userId     String
+  role       Role      @default(MEMBER)
+  joinedAt   DateTime  @default(now())
+  lastReadAt DateTime?
+  isPinned   Boolean   @default(false)
+  isArchived Boolean   @default(false)
+  mutedUntil DateTime?
+  /// DM'i "sil" diyen kullanıcı için bu tarihten önceki mesajlar gizlenir
+  clearedAt  DateTime?
+  hidden     Boolean   @default(false)
+
+  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, userId])
+  @@index([userId])
+  @@map("room_members")
+}
+
+model Message {
+  id        String      @id @default(uuid())
+  roomId    String
+  senderId  String
+  content   String
+  type      MessageType @default(TEXT)
+  replyToId String?
+  editedAt  DateTime?
+  deletedAt DateTime?
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  room    Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  sender  User      @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  replyTo Message?  @relation("MessageReply", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies Message[] @relation("MessageReply")
+
+  @@index([roomId, createdAt])
+  @@map("messages")
+}
