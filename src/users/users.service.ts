@@ -1,3 +1,4 @@
+import { RoomType, Visibility } from '@prisma/client';
 import {
   BadRequestException,
   ConflictException,
@@ -243,7 +244,7 @@ export class UsersService {
       data: dto,
     });
 
-    // Gizlilik değişince ilgili kişiler profili tazelesin
+    // 1. Profil ve son görülme gizliliği değiştiğinde
     const privacyKeys: (keyof UpdateSettingsDto)[] = [
       'lastSeenVisibility',
       'avatarVisibility',
@@ -251,7 +252,96 @@ export class UsersService {
     ];
     if (privacyKeys.some((k) => dto[k] !== undefined)) {
       await this.broadcastProfile(userId);
+
+      // Mütekabiliyet: Kullanıcının kendi DM odalarındaki karşı taraf durumlarını da anında güncelle
+      if (dto.lastSeenVisibility !== undefined) {
+        const directMemberships = await this.prisma.roomMember.findMany({
+          where: { userId, room: { type: RoomType.DIRECT } },
+          include: {
+            room: {
+              include: {
+                members: {
+                  include: { user: { select: publicUserSelect } },
+                },
+              },
+            },
+          },
+        });
+
+        for (const m of directMemberships) {
+          const peer = m.room.members.find((x) => x.userId !== userId)?.user;
+          if (!peer) continue;
+          const filtered = await this.privacy.filterUser(userId, peer);
+          const isOnline = this.realtime.isOnline(peer.id);
+          const finalStatus =
+            (filtered.status as string) === 'HIDDEN'
+              ? 'HIDDEN'
+              : isOnline
+                ? 'ONLINE'
+                : 'OFFLINE';
+          this.realtime.toUser(userId, 'user_status_changed', {
+            userId: peer.id,
+            status: finalStatus,
+            lastSeenAt: filtered.lastSeenAt,
+          });
+        }
+      }
     }
+
+    // 2. Okundu bilgisi gizliliği değiştiğinde
+    if (dto.readReceipts !== undefined) {
+      const directMemberships = await this.prisma.roomMember.findMany({
+        where: { userId, room: { type: RoomType.DIRECT } },
+        include: {
+          room: {
+            include: {
+              members: {
+                select: { userId: true, lastReadAt: true },
+              },
+            },
+          },
+        },
+      });
+
+      for (const m of directMemberships) {
+        const peer = m.room.members.find((x) => x.userId !== userId);
+        if (!peer) continue;
+        const peerSettings = await this.privacy.getSettings(peer.userId);
+
+        if (dto.readReceipts) {
+          // Okundu bilgisi açıldı: Karşı tarafın da okundu bilgisi açıksa karşılıklı readAt ilet
+          if (peerSettings.readReceipts) {
+            if (peer.lastReadAt) {
+              this.realtime.toUser(userId, 'messages_read', {
+                roomId: m.roomId,
+                userId: peer.userId,
+                readAt: peer.lastReadAt,
+              });
+            }
+            if (m.lastReadAt) {
+              this.realtime.toUser(peer.userId, 'messages_read', {
+                roomId: m.roomId,
+                userId,
+                readAt: m.lastReadAt,
+              });
+            }
+          }
+        } else {
+          // Okundu bilgisi kapatıldı: Karşı tarafa ve bana okundu bilgisinin sıfırlandığını bildir
+          this.realtime.toUser(peer.userId, 'messages_read', {
+            roomId: m.roomId,
+            userId,
+            readAt: null,
+          });
+          this.realtime.toUser(userId, 'messages_read', {
+            roomId: m.roomId,
+            userId: peer.userId,
+            readAt: null,
+          });
+        }
+      }
+    }
+
     // Kullanıcının diğer cihazları da senkron olsun
     this.realtime.toUser(userId, 'settings_updated', settings);
     return settings;

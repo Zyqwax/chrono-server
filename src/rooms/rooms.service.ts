@@ -116,7 +116,18 @@ export class RoomsService {
       .map((m) => m.room.members.find((x) => x.userId !== userId)?.user)
       .filter((u): u is NonNullable<typeof u> => !!u);
     const filteredPeers = new Map(
-      (await this.privacy.filterUsers(userId, peers)).map((u) => [u.id, u]),
+      (await this.privacy.filterUsers(userId, peers)).map((u) => [
+        u.id,
+        {
+          ...u,
+          status:
+            (u.status as string) === 'HIDDEN'
+              ? 'HIDDEN'
+              : this.realtime.isOnline(u.id)
+                ? 'ONLINE'
+                : 'OFFLINE',
+        },
+      ]),
     );
 
     return Promise.all(
@@ -173,7 +184,9 @@ export class RoomsService {
           lastMessageAt: room.lastMessageAt,
           membersCount: room.members.length,
           onlineCount: room.members.filter((x) => this.realtime.isOnline(x.userId)).length,
-          peer: peerRaw ? filteredPeers.get(peerRaw.id) ?? peerRaw : null,
+          peer: peerRaw
+            ? filteredPeers.get(peerRaw.id) ?? { ...peerRaw, status: 'HIDDEN', lastSeenAt: null }
+            : null,
           lastMessage: lastMessage ? sanitizeMessage(lastMessage) : null,
           unreadCount,
           isPinned: m.isPinned,
@@ -243,7 +256,20 @@ export class RoomsService {
       userId,
       room.members.map((m) => m.user),
     );
-    const fMap = new Map(filtered.map((u) => [u.id, u]));
+    const fMap = new Map(
+      filtered.map((u) => [
+        u.id,
+        {
+          ...u,
+          status:
+            (u.status as string) === 'HIDDEN'
+              ? 'HIDDEN'
+              : this.realtime.isOnline(u.id)
+                ? 'ONLINE'
+                : 'OFFLINE',
+        },
+      ]),
+    );
     const members = room.members.map((m) => ({
       id: m.id,
       roomId: m.roomId,
