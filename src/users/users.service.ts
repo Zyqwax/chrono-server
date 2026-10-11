@@ -27,6 +27,7 @@ export const meSelect = {
   bio: true,
   birthday: true,
   status: true,
+  pushToken: true,
   lastSeenAt: true,
   createdAt: true,
 } as const;

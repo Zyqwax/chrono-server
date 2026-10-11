@@ -19,6 +19,7 @@ import { RoomsService } from '../rooms/rooms.service';
 import { RealtimeService } from '../common/realtime.service';
 import { PrivacyService } from '../common/privacy.service';
 import { JWT_SECRET, senderSelect } from '../common/constants';
+import { PushNotificationService } from '../common/push-notification.service';
 
 type CallState = {
   callId: string;
@@ -59,6 +60,7 @@ export class ChatGateway
     private roomsService: RoomsService,
     private realtime: RealtimeService,
     private privacy: PrivacyService,
+    private pushNotifications: PushNotificationService,
   ) {}
 
   afterInit(server: Server) {
@@ -542,6 +544,29 @@ export class ChatGateway
     this.realtime.toUser(calleeId, 'call_incoming', payload);
     // Arayanın diğer cihazları da arama ekranını görsün
     this.realtime.toUser(userId, 'call_outgoing', payload);
+
+    // Aranan kullanıcı sokette değilse veya arka plandaysa acil çağrı push bildirimi gönder
+    void this.prisma.user
+      .findUnique({
+        where: { id: calleeId },
+        select: { pushToken: true },
+      })
+      .then((calleeUser) => {
+        if (calleeUser?.pushToken) {
+          const callerName =
+            payload.caller?.displayName ||
+            payload.caller?.username ||
+            'Chrono';
+          void this.pushNotifications.sendIncomingCallPush({
+            recipient: { userId: calleeId, pushToken: calleeUser.pushToken },
+            callerName,
+            roomId: data.roomId,
+            callId: call.callId,
+            isVideo: !!data.video,
+          });
+        }
+      })
+      .catch(() => {});
 
     return {
       ok: true,

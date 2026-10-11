@@ -63,6 +63,7 @@ export class AuthService {
         displayName: dto.displayName,
         passwordHash,
         avatarUrl: `https://api.dicebear.com/7.x/bottts/png?seed=${encodeURIComponent(dto.username)}`,
+        pushToken: dto.pushToken ? dto.pushToken.trim() : null,
       },
       select: {
         id: true,
@@ -71,6 +72,7 @@ export class AuthService {
         displayName: true,
         avatarUrl: true,
         status: true,
+        pushToken: true,
         createdAt: true,
       },
     });
@@ -103,6 +105,16 @@ export class AuthService {
       throw new UnauthorizedException('Geçersiz kullanıcı adı veya şifre');
     }
 
+    let currentPushToken = user.pushToken;
+    if (dto.pushToken && dto.pushToken.trim() !== user.pushToken) {
+      const cleanToken = dto.pushToken.trim();
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { pushToken: cleanToken },
+      });
+      currentPushToken = cleanToken;
+    }
+
     const token = this.generateToken(user.id, user.email);
 
     return {
@@ -113,6 +125,7 @@ export class AuthService {
         displayName: user.displayName,
         avatarUrl: user.avatarUrl,
         status: user.status,
+        pushToken: currentPushToken,
       },
       accessToken: token,
     };

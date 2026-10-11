@@ -1,6 +1,7 @@
 import {
   IsEmail,
   IsNotEmpty,
+  IsOptional,
   IsString,
   Matches,
   MaxLength,
@@ -28,6 +29,10 @@ export class RegisterDto {
   @IsString()
   @MinLength(6, { message: 'Şifre en az 6 karakter olmalıdır' })
   password: string;
+
+  @IsOptional()
+  @IsString()
+  pushToken?: string;
 }
 
 export class LoginDto {
@@ -36,6 +41,10 @@ export class LoginDto {
 
   @IsNotEmpty({ message: 'Şifrenizi giriniz' })
   password: string;
+
+  @IsOptional()
+  @IsString()
+  pushToken?: string;
 }
 
 export class CheckUserDto {

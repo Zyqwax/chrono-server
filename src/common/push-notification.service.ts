@@ -13,6 +13,14 @@ export interface SendChatMessagePushOptions {
   roomId: string;
 }
 
+export interface SendCallPushOptions {
+  recipient: PushRecipient;
+  callerName: string;
+  roomId: string;
+  callId: string;
+  isVideo: boolean;
+}
+
 @Injectable()
 export class PushNotificationService {
   private readonly logger = new Logger(PushNotificationService.name);
@@ -67,6 +75,46 @@ export class PushNotificationService {
       } catch (error) {
         this.logger.error('Expo push bildirimleri gönderilirken hata oluştu:', error);
       }
+    }
+  }
+
+  /**
+   * Gelen sesli/görüntülü arama için yüksek öncelikli Heads-up çağrı bildirimi gönderir.
+   */
+  async sendIncomingCallPush({
+    recipient,
+    callerName,
+    roomId,
+    callId,
+    isVideo,
+  }: SendCallPushOptions): Promise<void> {
+    if (!recipient.pushToken || !Expo.isExpoPushToken(recipient.pushToken)) return;
+
+    const message: ExpoPushMessage = {
+      to: recipient.pushToken,
+      sound: 'default',
+      priority: 'high',
+      title: callerName,
+      body: isVideo ? '📹 Gelen görüntülü arama...' : '📞 Gelen sesli arama...',
+      data: {
+        type: 'incoming_call',
+        roomId,
+        callId,
+        video: isVideo,
+        callerName,
+      },
+      channelId: 'calls_channel',
+    };
+
+    try {
+      const tickets = await this.expo.sendPushNotificationsAsync([message]);
+      for (const ticket of tickets) {
+        if (ticket.status === 'error') {
+          this.logger.warn(`Arama push bildirimi gönderilemedi: ${ticket.message}`);
+        }
+      }
+    } catch (error) {
+      this.logger.error('Expo arama bildirimi gönderilirken hata:', error);
     }
   }
 }
