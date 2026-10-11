@@ -9,6 +9,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeService } from '../common/realtime.service';
 import { messageInclude } from '../common/constants';
 import { RoomsService, sanitizeMessage } from '../rooms/rooms.service';
+import { PushNotificationService } from '../common/push-notification.service';
 import { SendMessageDto } from './dto/message.dto';
 
 @Injectable()
@@ -17,6 +18,7 @@ export class MessagesService {
     private prisma: PrismaService,
     private realtime: RealtimeService,
     private rooms: RoomsService,
+    private pushNotifications: PushNotificationService,
   ) {}
 
   async sendMessage(
@@ -83,6 +85,55 @@ export class MessagesService {
 
     const memberIds = await this.rooms.getMemberIds(roomId);
     this.realtime.toUsers(memberIds, 'new_message', message);
+
+    // ------------------------------------------------------------------
+    // Koşullu Push Bildirimi Gönderimi
+    // Alıcı WebSocket üzerinde ilgili odada aktifse push gönderme;
+    // Odada değilse / uygulamadan çıkmışsa push bildirimi gönder!
+    // ------------------------------------------------------------------
+    const otherMemberIds = memberIds.filter((id) => id !== userId);
+    if (otherMemberIds.length > 0) {
+      const inactiveUserIds = otherMemberIds.filter(
+        (id) => !this.realtime.isUserInRoom(id, roomId),
+      );
+
+      if (inactiveUserIds.length > 0) {
+        void this.prisma.user
+          .findMany({
+            where: {
+              id: { in: inactiveUserIds },
+              pushToken: { not: null },
+            },
+            select: { id: true, pushToken: true },
+          })
+          .then((targetUsers) => {
+            const recipients = targetUsers
+              .filter((u): u is { id: string; pushToken: string } => Boolean(u.pushToken))
+              .map((u) => ({ userId: u.id, pushToken: u.pushToken }));
+
+            if (recipients.length > 0) {
+              const senderName =
+                message.sender?.displayName ||
+                message.sender?.username ||
+                'Chrono';
+
+              const pushBody =
+                type === MessageType.IMAGE
+                  ? '📷 Fotoğraf'
+                  : content;
+
+              void this.pushNotifications.sendChatMessagePush({
+                recipients,
+                senderName,
+                body: pushBody,
+                roomId,
+              });
+            }
+          })
+          .catch(() => {});
+      }
+    }
+
     return message;
   }
 

@@ -45,6 +45,12 @@ export class UpdateProfileDto {
   birthday?: string | null;
 }
 
+export class UpdatePushTokenDto {
+  @IsOptional()
+  @IsString()
+  pushToken?: string | null;
+}
+
 export class ChangePasswordDto {
   @IsString()
   @IsNotEmpty({ message: 'Mevcut şifrenizi giriniz' })

@@ -10,6 +10,8 @@ export class RealtimeService {
   private server: Server | null = null;
   /** userId -> socketId[] */
   readonly onlineUsers = new Map<string, Set<string>>();
+  /** roomId -> Set of userIds currently viewing this room */
+  readonly activeRoomUsers = new Map<string, Set<string>>();
 
   attach(server: Server) {
     this.server = server;
@@ -17,6 +19,41 @@ export class RealtimeService {
 
   isOnline(userId: string) {
     return (this.onlineUsers.get(userId)?.size ?? 0) > 0;
+  }
+
+  /** Kullanıcı bir odaya aktif olarak girdiğinde kaydet */
+  joinRoom(userId: string, roomId: string) {
+    let users = this.activeRoomUsers.get(roomId);
+    if (!users) {
+      users = new Set<string>();
+      this.activeRoomUsers.set(roomId, users);
+    }
+    users.add(userId);
+  }
+
+  /** Kullanıcı odadan çıktığında kaldır */
+  leaveRoom(userId: string, roomId: string) {
+    const users = this.activeRoomUsers.get(roomId);
+    if (users) {
+      users.delete(userId);
+      if (users.size === 0) {
+        this.activeRoomUsers.delete(roomId);
+      }
+    }
+  }
+
+  /** Kullanıcının bağlantısı koptuğunda tüm aktif odalardan çıkar */
+  removeUserFromAllRooms(userId: string) {
+    for (const [roomId, users] of this.activeRoomUsers.entries()) {
+      if (users.delete(userId) && users.size === 0) {
+        this.activeRoomUsers.delete(roomId);
+      }
+    }
+  }
+
+  /** Kullanıcı şu an bu odada aktif olarak bulunuyor mu? */
+  isUserInRoom(userId: string, roomId: string): boolean {
+    return this.activeRoomUsers.get(roomId)?.has(userId) ?? false;
   }
 
   toUser(userId: string, event: string, payload: unknown) {

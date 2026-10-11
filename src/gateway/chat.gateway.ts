@@ -140,6 +140,7 @@ export class ChatGateway
     if (sockets && sockets.size > 0) return;
 
     this.realtime.onlineUsers.delete(userId);
+    this.realtime.removeUserFromAllRooms(userId);
     const lastSeenAt = new Date();
     await this.prisma.user
       .update({ where: { id: userId }, data: { status: 'OFFLINE', lastSeenAt } })
@@ -271,6 +272,7 @@ export class ChatGateway
       return { status: 'forbidden' };
     }
     await client.join(`room:${data.roomId}`);
+    this.realtime.joinRoom(userId, data.roomId);
     client.emit('voice_state_updated', {
       roomId: data.roomId,
       participants: Array.from(this.activeVoiceRooms.get(data.roomId) ?? []),
@@ -283,6 +285,10 @@ export class ChatGateway
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { roomId: string },
   ) {
+    const userId = client.data?.userId;
+    if (userId && data?.roomId) {
+      this.realtime.leaveRoom(userId, data.roomId);
+    }
     await client.leave(`room:${data.roomId}`);
     return { status: 'left', roomId: data.roomId };
   }

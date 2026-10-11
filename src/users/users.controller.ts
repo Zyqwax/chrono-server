@@ -7,6 +7,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Query,
   UploadedFile,
   UseGuards,
@@ -21,6 +22,7 @@ import {
   ChangePasswordDto,
   DeleteAccountDto,
   UpdateProfileDto,
+  UpdatePushTokenDto,
   UpdateSettingsDto,
 } from './dto/users.dto';
 
@@ -39,6 +41,14 @@ export class UsersController {
   @Patch('me')
   updateMe(@CurrentUser() user: AuthUser, @Body() dto: UpdateProfileDto) {
     return this.usersService.updateMe(user.id, dto);
+  }
+
+  @Put('me/push-token')
+  updatePushToken(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: UpdatePushTokenDto,
+  ) {
+    return this.usersService.updatePushToken(user.id, dto.pushToken);
   }
 
   @Post('me/avatar')
