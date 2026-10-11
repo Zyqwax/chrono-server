@@ -186,7 +186,7 @@ export class ChatGateway
     }
   }
 
-  /** Durumu, gizlilik ayarına uyarak yalnızca ilgili kullanıcılara yayınla */
+  /** Durumu, gizlilik ayarına ve karşılıklılık ilkesine uyarak ilgili kullanıcılara yayınla */
   private async broadcastPresence(
     userId: string,
     status: 'ONLINE' | 'OFFLINE',
@@ -194,18 +194,64 @@ export class ChatGateway
   ) {
     const related = await this.privacy.getRelatedUserIds(userId);
     if (related.length === 0) return;
-    const settings = await this.privacy.getSettings(userId);
 
-    let allowed = related;
-    if (settings.lastSeenVisibility === 'NOBODY') return;
-    if (settings.lastSeenVisibility === 'CONTACTS') {
-      const contacts = await this.prisma.contact.findMany({
-        where: { ownerId: userId, contactId: { in: related } },
-        select: { contactId: true },
-      });
-      allowed = contacts.map((c) => c.contactId);
+    const [userSettings, relatedSettings, contacts] = await Promise.all([
+      this.privacy.getSettings(userId),
+      this.prisma.userSettings.findMany({
+        where: { userId: { in: related } },
+      }),
+      this.prisma.contact.findMany({
+        where: {
+          OR: [
+            { ownerId: userId, contactId: { in: related } },
+            { ownerId: { in: related }, contactId: userId },
+          ],
+        },
+      }),
+    ]);
+
+    const settingsMap = new Map(relatedSettings.map((s) => [s.userId, s]));
+    const isContactOfUser = new Set(
+      contacts.filter((c) => c.ownerId === userId).map((c) => c.contactId),
+    );
+    const isContactOfViewer = new Set(
+      contacts.filter((c) => c.contactId === userId).map((c) => c.ownerId),
+    );
+
+    for (const viewerId of related) {
+      const viewerSettings = settingsMap.get(viewerId);
+      const isViewerInUserContacts = isContactOfUser.has(viewerId);
+      const isUserInViewerContacts = isContactOfViewer.has(viewerId);
+
+      // 1. Kullanıcı viewer'a izin veriyor mu?
+      const userAllows = this.privacy.allowed(
+        userSettings.lastSeenVisibility,
+        isViewerInUserContacts,
+        false,
+      );
+
+      // 2. Viewer kendi çevrimiçi durumunu paylaşıyor mu (mütekabiliyet)?
+      const viewerAllows = viewerSettings
+        ? this.privacy.allowed(viewerSettings.lastSeenVisibility, isUserInViewerContacts, false)
+        : true;
+
+      const canSee = userAllows && viewerAllows;
+
+      if (canSee) {
+        this.realtime.toUser(viewerId, 'user_status_changed', {
+          userId,
+          status,
+          lastSeenAt,
+        });
+      } else {
+        // Çevrimiçi durumunu gizleyen kullanıcı diğerleri için HIDDEN görünür
+        this.realtime.toUser(viewerId, 'user_status_changed', {
+          userId,
+          status: 'HIDDEN',
+          lastSeenAt: null,
+        });
+      }
     }
-    this.realtime.toUsers(allowed, 'user_status_changed', { userId, status, lastSeenAt });
   }
 
   // ------------------------------------------------------------------

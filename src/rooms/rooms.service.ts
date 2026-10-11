@@ -142,14 +142,21 @@ export class RoomsService {
         }
 
         const others = room.members.filter((x) => x.userId !== userId);
-        const iDisabledReceipts = noReceipts.has(userId);
-        const othersReadAt =
-          room.type === RoomType.DIRECT && iDisabledReceipts
-            ? null
-            : others
-                .filter((x) => !noReceipts.has(x.userId) && x.lastReadAt)
-                .map((x) => x.lastReadAt as Date)
-                .reduce<Date | null>((a, b) => (!a || b > a ? b : a), null);
+        let othersReadAt: Date | null = null;
+        if (room.type === RoomType.ROOM) {
+          // Oda sohbetlerinde okundu bilgisi kapatma geçerli olmaz
+          othersReadAt = others
+            .map((x) => x.lastReadAt as Date)
+            .filter(Boolean)
+            .reduce<Date | null>((a, b) => (!a || b > a ? b : a), null);
+        } else {
+          // Birebir (DM): Kapatan kişi ne karşıya gönderir ne de karşıdan alır
+          const iDisabled = noReceipts.has(userId);
+          const peerDisabled = others.some((x) => noReceipts.has(x.userId));
+          if (!iDisabled && !peerDisabled) {
+            othersReadAt = others[0]?.lastReadAt ?? null;
+          }
+        }
 
         const peerRaw =
           room.type === RoomType.DIRECT ? others[0]?.user ?? null : null;
@@ -720,11 +727,29 @@ export class RoomsService {
     // Kendi diğer cihazlarım: okunmamış sayısını sıfırla
     this.realtime.toUser(userId, 'room_read', { roomId, unreadCount: 0 });
 
-    // Okundu bilgisi açıksa diğer üyelere ✓✓ yayınla
+    const room = await this.prisma.room.findUnique({
+      where: { id: roomId },
+      select: { type: true },
+    });
+    const isRoom = room?.type === RoomType.ROOM;
     const settings = await this.privacy.getSettings(userId);
-    if (settings.readReceipts) {
+
+    // Oda sohbetlerinde okundu bilgisi kapatma geçerli olmaz; her zaman yayınlanır
+    if (isRoom) {
       const memberIds = (await this.getMemberIds(roomId)).filter((id) => id !== userId);
       this.realtime.toUsers(memberIds, 'messages_read', { roomId, userId, readAt });
+    } else {
+      // DM: Okundu bilgisini kapatan kişi ne karşıya okundu bilgisi gönderir ne de karşıdan alır
+      if (settings.readReceipts) {
+        const memberIds = (await this.getMemberIds(roomId)).filter((id) => id !== userId);
+        const peerId = memberIds[0];
+        if (peerId) {
+          const peerSettings = await this.privacy.getSettings(peerId);
+          if (peerSettings.readReceipts) {
+            this.realtime.toUser(peerId, 'messages_read', { roomId, userId, readAt });
+          }
+        }
+      }
     }
     return { success: true, readAt };
   }

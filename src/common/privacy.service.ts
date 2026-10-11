@@ -47,30 +47,55 @@ export class PrivacyService {
 
   /**
    * Birden fazla kullanıcıyı tek seferde viewer'a göre filtreler.
+   * Karşılıklılık (reciprocal) ilkesi: Viewer kendi çevrimiçi/son görülme durumunu gizlediyse,
+   * başkalarının çevrimiçi durumunu da göremez.
    */
   async filterUsers<T extends PublicUser>(viewerId: string, users: T[]): Promise<T[]> {
     if (users.length === 0) return users;
     const ids = [...new Set(users.map((u) => u.id))];
-    const [settings, contactRows] = await Promise.all([
+    const [settings, contactRows, viewerSettings, viewerContactRows] = await Promise.all([
       this.prisma.userSettings.findMany({ where: { userId: { in: ids } } }),
       this.prisma.contact.findMany({
         where: { ownerId: { in: ids }, contactId: viewerId },
         select: { ownerId: true },
       }),
+      this.getSettings(viewerId),
+      this.prisma.contact.findMany({
+        where: { ownerId: viewerId, contactId: { in: ids } },
+        select: { contactId: true },
+      }),
     ]);
     const settingsMap = new Map(settings.map((s) => [s.userId, s]));
     const contactSet = new Set(contactRows.map((c) => c.ownerId));
+    const viewerContactSet = new Set(viewerContactRows.map((c) => c.contactId));
 
     return users.map((u) => {
-      const s = settingsMap.get(u.id);
-      if (!s) return u; // varsayılanlar: herkes görebilir
       const isSelf = u.id === viewerId;
-      const isContact = contactSet.has(u.id);
-      const canSeeLastSeen = this.allowed(s.lastSeenVisibility, isContact, isSelf);
+      if (isSelf) return u;
+
+      const s = settingsMap.get(u.id);
+      const isContactOfTarget = contactSet.has(u.id);
+      const isContactOfViewer = viewerContactSet.has(u.id);
+
+      // 1. Hedef kullanıcının ayarı viewer'a izin veriyor mu?
+      const targetAllows = s
+        ? this.allowed(s.lastSeenVisibility, isContactOfTarget, false)
+        : true;
+
+      // 2. Mütekabiliyet (Reciprocal): Viewer kendi çevrimiçi bilgisini paylaşıyor mu?
+      // Kendi bilgisini gizleyen (NOBODY veya uygun olmayan CONTACTS) başkasını da göremez.
+      const viewerAllows = this.allowed(
+        viewerSettings.lastSeenVisibility,
+        isContactOfViewer,
+        false,
+      );
+
+      const canSeeLastSeen = targetAllows && viewerAllows;
+
       return {
         ...u,
-        avatarUrl: this.allowed(s.avatarVisibility, isContact, isSelf) ? u.avatarUrl : null,
-        bio: this.allowed(s.bioVisibility, isContact, isSelf) ? u.bio : null,
+        avatarUrl: s ? (this.allowed(s.avatarVisibility, isContactOfTarget, false) ? u.avatarUrl : null) : u.avatarUrl,
+        bio: s ? (this.allowed(s.bioVisibility, isContactOfTarget, false) ? u.bio : null) : u.bio,
         status: canSeeLastSeen ? u.status : 'HIDDEN',
         lastSeenAt: canSeeLastSeen ? u.lastSeenAt : null,
       };

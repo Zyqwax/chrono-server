@@ -333,6 +333,11 @@ export class UsersService {
     for (const viewerId of related) {
       const filtered = await this.privacy.filterUser(viewerId, raw);
       this.realtime.toUser(viewerId, 'user_updated', filtered);
+      this.realtime.toUser(viewerId, 'user_status_changed', {
+        userId,
+        status: filtered.status,
+        lastSeenAt: filtered.lastSeenAt,
+      });
     }
   }
 }
