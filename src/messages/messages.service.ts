@@ -137,13 +137,27 @@ export class MessagesService {
     return message;
   }
 
-  async getMessages(roomId: string, userId: string, limit = 50, before?: string) {
+  async getMessages(
+    roomId: string,
+    userId: string,
+    limit = 50,
+    before?: string,
+    after?: string,
+  ) {
     const membership = await this.rooms.requireMembership(userId, roomId);
     const take = Math.min(Math.max(limit, 1), 100);
 
     const createdAt: { lt?: Date; gt?: Date } = {};
     if (before) createdAt.lt = new Date(before);
-    if (membership.clearedAt) createdAt.gt = membership.clearedAt;
+    if (after) {
+      const afterDate = new Date(after);
+      createdAt.gt =
+        membership.clearedAt && membership.clearedAt > afterDate
+          ? membership.clearedAt
+          : afterDate;
+    } else if (membership.clearedAt) {
+      createdAt.gt = membership.clearedAt;
+    }
 
     const messages = await this.prisma.message.findMany({
       where: {
@@ -151,16 +165,19 @@ export class MessagesService {
         ...(Object.keys(createdAt).length ? { createdAt } : {}),
       },
       take,
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: after ? 'asc' : 'desc' },
       include: messageInclude,
     });
 
-    return messages.map((m) =>
+    const sanitized = messages.map((m) =>
       sanitizeMessage({
         ...m,
         replyTo: m.replyTo ? sanitizeMessage(m.replyTo) : null,
       }),
     );
+
+    // after kullanıldığında asc çekip tekrar desc sıralayarak tutarlı dönüş sağla
+    return after ? sanitized.reverse() : sanitized;
   }
 
   async editMessage(messageId: string, userId: string, content: string) {

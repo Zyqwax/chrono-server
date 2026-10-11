@@ -34,12 +34,14 @@ export class MessagesController {
     @Param('roomId') roomId: string,
     @Query('limit') limit?: string,
     @Query('before') before?: string,
+    @Query('after') after?: string,
   ) {
     return this.messagesService.getMessages(
       roomId,
       user.id,
       limit ? parseInt(limit, 10) : 50,
       before,
+      after,
     );
   }
 
