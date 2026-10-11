@@ -549,9 +549,12 @@ export class ChatGateway
     void this.prisma.user
       .findUnique({
         where: { id: calleeId },
-        select: { pushToken: true },
+        select: { id: true, username: true, pushToken: true },
       })
       .then((calleeUser) => {
+        this.logger.log(
+          `[ChatGateway] call_start çağrıldı -> Arayan: ${userId}, Aranan: ${calleeUser?.username} (${calleeId}), callee pushToken: ${calleeUser?.pushToken || 'NULL'}`,
+        );
         if (calleeUser?.pushToken) {
           const callerName =
             payload.caller?.displayName ||
@@ -564,9 +567,15 @@ export class ChatGateway
             callId: call.callId,
             isVideo: !!data.video,
           });
+        } else {
+          this.logger.warn(
+            `[ChatGateway] Aranan kullanıcı (${calleeId}) için pushToken bulunamadı, arama push bildirimi atlanıyor.`,
+          );
         }
       })
-      .catch(() => {});
+      .catch((err) => {
+        this.logger.error(`[ChatGateway] Arama push bildirimi hazırlanırken hata: ${String(err)}`);
+      });
 
     return {
       ok: true,

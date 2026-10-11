@@ -3,6 +3,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -34,6 +35,8 @@ export const meSelect = {
 
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
+
   constructor(
     private prisma: PrismaService,
     private cloudinary: CloudinaryService,
@@ -433,10 +436,18 @@ export class UsersService {
   }
 
   async updatePushToken(userId: string, pushToken?: string | null) {
-    return this.prisma.user.update({
+    const cleanToken = pushToken ? pushToken.trim() : null;
+    this.logger.log(
+      `[UsersService] updatePushToken çağrıldı -> userId: ${userId}, pushToken: ${cleanToken || 'NULL'}`,
+    );
+    const updated = await this.prisma.user.update({
       where: { id: userId },
-      data: { pushToken: pushToken ? pushToken.trim() : null },
-      select: { id: true, pushToken: true },
+      data: { pushToken: cleanToken },
+      select: { id: true, username: true, pushToken: true },
     });
+    this.logger.log(
+      `[UsersService] pushToken veritabanına yazıldı -> ${updated.username} (${updated.id}) = ${updated.pushToken || 'NULL'}`,
+    );
+    return { id: updated.id, pushToken: updated.pushToken };
   }
 }

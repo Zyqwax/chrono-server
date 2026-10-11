@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Logger,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -43,11 +44,16 @@ export class UsersController {
     return this.usersService.updateMe(user.id, dto);
   }
 
+  private readonly logger = new Logger(UsersController.name);
+
   @Put('me/push-token')
   updatePushToken(
     @CurrentUser() user: AuthUser,
     @Body() dto: UpdatePushTokenDto,
   ) {
+    this.logger.log(
+      `[UsersController] PUT /users/me/push-token çağrıldı -> userId: ${user.id}, pushToken: ${dto.pushToken || 'NULL'}`,
+    );
     return this.usersService.updatePushToken(user.id, dto.pushToken);
   }
 

@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
@@ -11,6 +12,8 @@ import { LoginDto, RegisterDto } from './dto/auth.dto';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
@@ -77,6 +80,10 @@ export class AuthService {
       },
     });
 
+    this.logger.log(
+      `[AuthService] Yeni kullanıcı kaydedildi: ${user.username} (${user.id}) -> pushToken: ${user.pushToken || 'NULL'}`,
+    );
+
     const token = this.generateToken(user.id, user.email);
 
     return {
@@ -106,6 +113,10 @@ export class AuthService {
     }
 
     let currentPushToken = user.pushToken;
+    this.logger.log(
+      `[AuthService] Kullanıcı giriş yaptı: ${user.username} (${user.id}) -> İstekten gelen pushToken: ${dto.pushToken ? dto.pushToken.trim() : 'YOK'}, DB'deki token: ${user.pushToken || 'YOK'}`,
+    );
+
     if (dto.pushToken && dto.pushToken.trim() !== user.pushToken) {
       const cleanToken = dto.pushToken.trim();
       await this.prisma.user.update({
@@ -113,6 +124,9 @@ export class AuthService {
         data: { pushToken: cleanToken },
       });
       currentPushToken = cleanToken;
+      this.logger.log(
+        `[AuthService] Kullanıcı ${user.username} için pushToken güncellendi: ${currentPushToken}`,
+      );
     }
 
     const token = this.generateToken(user.id, user.email);

@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { MessageType, Role, RoomType } from '@prisma/client';
@@ -14,6 +15,8 @@ import { SendMessageDto } from './dto/message.dto';
 
 @Injectable()
 export class MessagesService {
+  private readonly logger = new Logger(MessagesService.name);
+
   constructor(
     private prisma: PrismaService,
     private realtime: RealtimeService,
@@ -97,21 +100,37 @@ export class MessagesService {
         (id) => !this.realtime.isUserInRoom(id, roomId),
       );
 
+      this.logger.log(
+        `[MessagesService] Mesaj push değerlendirmesi -> Oda: ${roomId}, Diğer üyeler: [${otherMemberIds.join(', ')}], Odada olmayanlar: [${inactiveUserIds.join(', ')}]`,
+      );
+
       if (inactiveUserIds.length > 0) {
         void this.prisma.user
           .findMany({
             where: {
               id: { in: inactiveUserIds },
-              pushToken: { not: null },
             },
-            select: { id: true, pushToken: true },
+            select: { id: true, username: true, pushToken: true },
           })
           .then((targetUsers) => {
-            const recipients = targetUsers
-              .filter((u): u is { id: string; pushToken: string } => Boolean(u.pushToken))
-              .map((u) => ({ userId: u.id, pushToken: u.pushToken }));
+            const withToken = targetUsers.filter((u) => Boolean(u.pushToken));
+            const withoutToken = targetUsers.filter((u) => !u.pushToken);
+
+            if (withoutToken.length > 0) {
+              this.logger.warn(
+                `[MessagesService] ⚠️ Bildirim gönderilemeyen (DB'de pushToken'ı NULL olan) kullanıcılar: ${withoutToken.map((u) => `${u.username} (${u.id})`).join(', ')}`,
+              );
+            }
+
+            const recipients = withToken.map((u) => ({
+              userId: u.id,
+              pushToken: u.pushToken!,
+            }));
 
             if (recipients.length > 0) {
+              this.logger.log(
+                `[MessagesService] 📲 Push bildirimi gönderilecek: ${withToken.map((u) => `${u.username} -> ${u.pushToken}`).join(', ')}`,
+              );
               const senderName =
                 message.sender?.displayName ||
                 message.sender?.username ||
@@ -128,9 +147,17 @@ export class MessagesService {
                 body: pushBody,
                 roomId,
               });
+            } else {
+              this.logger.warn(
+                `[MessagesService] ⚠️ Hiçbir inaktif kullanıcının geçerli pushToken'ı yok, push gönderilmedi.`,
+              );
             }
           })
-          .catch(() => {});
+          .catch((err) => {
+            this.logger.error(
+              `[MessagesService] Push alıcıları sorgulanırken hata: ${String(err)}`,
+            );
+          });
       }
     }
 
