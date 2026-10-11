@@ -4,12 +4,12 @@ FROM node:20-alpine AS base
 RUN corepack enable && corepack prepare pnpm@latest --activate
 WORKDIR /app
 
-# Paket tanımları ve Prisma şemasını kopyala
-COPY package.json pnpm-lock.yaml* ./
+# Paket tanımları, pnpm çalışma alanı onayları (.npmrc, pnpm-workspace.yaml) ve Prisma şemasını kopyala
+COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml* .npmrc* ./
 COPY prisma ./prisma/
 
-# Bağımlılıkları yükle
-RUN pnpm install
+# Bağımlılıkları yükle (build script onaylarıyla birlikte)
+RUN pnpm install || (pnpm approve-builds --all && pnpm install)
 
 # Kaynak kodları kopyala
 COPY . .
