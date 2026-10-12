@@ -52,9 +52,9 @@ export class UsersController {
     @Body() dto: UpdatePushTokenDto,
   ) {
     this.logger.log(
-      `[UsersController] PUT /users/me/push-token çağrıldı -> userId: ${user.id}, pushToken: ${dto.pushToken || 'NULL'}`,
+      `[UsersController] PUT /users/me/push-token çağrıldı -> userId: ${user.id}, pushToken: ${dto.pushToken || 'NULL'}, platform: ${dto.platform || 'NULL'}`,
     );
-    return this.usersService.updatePushToken(user.id, dto.pushToken);
+    return this.usersService.updatePushToken(user.id, dto.pushToken, dto.platform);
   }
 
   @Post('me/avatar')

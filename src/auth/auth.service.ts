@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   ConflictException,
   Injectable,
   Logger,
@@ -67,6 +66,7 @@ export class AuthService {
         passwordHash,
         avatarUrl: `https://api.dicebear.com/7.x/bottts/png?seed=${encodeURIComponent(dto.username)}`,
         pushToken: dto.pushToken ? dto.pushToken.trim() : null,
+        pushPlatform: dto.platform ? dto.platform.trim().toLowerCase() : null,
       },
       select: {
         id: true,
@@ -76,12 +76,13 @@ export class AuthService {
         avatarUrl: true,
         status: true,
         pushToken: true,
+        pushPlatform: true,
         createdAt: true,
       },
     });
 
     this.logger.log(
-      `[AuthService] Yeni kullanıcı kaydedildi: ${user.username} (${user.id}) -> pushToken: ${user.pushToken || 'NULL'}`,
+      `[AuthService] Yeni kullanıcı kaydedildi: ${user.username} (${user.id}) -> pushToken: ${user.pushToken || 'NULL'}, platform: ${user.pushPlatform || 'NULL'}`,
     );
 
     const token = this.generateToken(user.id, user.email);
@@ -117,15 +118,19 @@ export class AuthService {
       `[AuthService] Kullanıcı giriş yaptı: ${user.username} (${user.id}) -> İstekten gelen pushToken: ${dto.pushToken ? dto.pushToken.trim() : 'YOK'}, DB'deki token: ${user.pushToken || 'YOK'}`,
     );
 
-    if (dto.pushToken && dto.pushToken.trim() !== user.pushToken) {
+    if (dto.pushToken && (dto.pushToken.trim() !== user.pushToken || dto.platform)) {
       const cleanToken = dto.pushToken.trim();
+      const cleanPlatform = dto.platform ? dto.platform.trim().toLowerCase() : user.pushPlatform;
       await this.prisma.user.update({
         where: { id: user.id },
-        data: { pushToken: cleanToken },
+        data: {
+          pushToken: cleanToken,
+          pushPlatform: cleanPlatform,
+        },
       });
       currentPushToken = cleanToken;
       this.logger.log(
-        `[AuthService] Kullanıcı ${user.username} için pushToken güncellendi: ${currentPushToken}`,
+        `[AuthService] Kullanıcı ${user.username} için pushToken güncellendi: ${currentPushToken} [${cleanPlatform || 'NULL'}]`,
       );
     }
 

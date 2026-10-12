@@ -52,6 +52,7 @@ model User {
   status       UserStatus @default(OFFLINE)
   lastSeenAt   DateTime?
   pushToken    String?
+  pushPlatform String?
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 

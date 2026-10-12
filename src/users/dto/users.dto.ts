@@ -49,6 +49,10 @@ export class UpdatePushTokenDto {
   @IsOptional()
   @IsString()
   pushToken?: string | null;
+
+  @IsOptional()
+  @IsString()
+  platform?: string | null;
 }
 
 export class ChangePasswordDto {

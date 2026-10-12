@@ -4,6 +4,7 @@ import { Expo, ExpoPushMessage } from 'expo-server-sdk';
 export interface PushRecipient {
   userId: string;
   pushToken: string;
+  platform?: string | null;
 }
 
 export interface SendChatMessagePushOptions {
@@ -19,6 +20,12 @@ export interface SendCallPushOptions {
   roomId: string;
   callId: string;
   isVideo: boolean;
+}
+
+export interface SendCallCancelledPushOptions {
+  recipient: PushRecipient;
+  callId: string;
+  roomId: string;
 }
 
 @Injectable()
@@ -110,7 +117,7 @@ export class PushNotificationService {
     isVideo,
   }: SendCallPushOptions): Promise<void> {
     this.logger.log(
-      `[PushNotificationService] sendIncomingCallPush çağrıldı -> Arayan: "${callerName}", Alıcı userId: ${recipient.userId}, token: ${recipient.pushToken || 'NULL'}`,
+      `[PushNotificationService] sendIncomingCallPush çağrıldı -> Arayan: "${callerName}", Alıcı userId: ${recipient.userId}, platform: ${recipient.platform || 'unknown'}, token: ${recipient.pushToken || 'NULL'}`,
     );
 
     if (!recipient.pushToken || !Expo.isExpoPushToken(recipient.pushToken)) {
@@ -120,21 +127,45 @@ export class PushNotificationService {
       return;
     }
 
-    const message: ExpoPushMessage = {
-      to: recipient.pushToken,
-      sound: 'default',
-      priority: 'high',
-      title: callerName,
-      body: isVideo ? '📹 Gelen görüntülü arama...' : '📞 Gelen sesli arama...',
-      data: {
-        type: 'incoming_call',
-        roomId,
-        callId,
-        video: isVideo,
-        callerName,
-      },
-      channelId: 'calls_channel_v2',
-    };
+    const isIos = recipient.platform?.toLowerCase() === 'ios';
+    let message: ExpoPushMessage;
+
+    if (isIos) {
+      // TODO: iOS'ta kapalı uygulamada yerel CallKit UI'ını uyandırmak için PushKit (VoIP Push) gereklidir.
+      // APNs / PushKit entegrasyonu kapsam dışı olduğundan iOS alıcıya time-sensitive görünür bildirim gönderilir.
+      message = {
+        to: recipient.pushToken,
+        sound: 'ringtone.wav',
+        priority: 'high',
+        ttl: 30,
+        title: callerName,
+        body: isVideo ? '📹 Gelen görüntülü arama...' : '📞 Gelen sesli arama...',
+        categoryId: 'call',
+        interruptionLevel: 'time-sensitive',
+        data: {
+          type: 'incoming_call',
+          roomId,
+          callId,
+          video: isVideo,
+          callerName,
+        },
+      };
+    } else {
+      // Android için DATA-ONLY push (title, body, sound, channelId OLMADAN).
+      // Expo arka planda statik bildirim göstermez; cihazda background task (TaskManager) tetiklenir.
+      message = {
+        to: recipient.pushToken,
+        priority: 'high',
+        ttl: 30,
+        data: {
+          type: 'incoming_call',
+          roomId,
+          callId,
+          video: isVideo,
+          callerName,
+        },
+      };
+    }
 
     try {
       const tickets = await this.expo.sendPushNotificationsAsync([message]);
@@ -146,6 +177,41 @@ export class PushNotificationService {
       }
     } catch (error) {
       this.logger.error('[PushNotificationService] ❌ Expo arama bildirimi gönderilirken hata:', error);
+    }
+  }
+
+  /**
+   * İptal edilen / zaman aşımına uğrayan / başka cihazda cevaplanan arama için data-only temizlik bildirimi gönderir.
+   */
+  async sendCallCancelledPush({
+    recipient,
+    callId,
+    roomId,
+  }: SendCallCancelledPushOptions): Promise<void> {
+    this.logger.log(
+      `[PushNotificationService] sendCallCancelledPush çağrıldı -> callId: ${callId}, Alıcı userId: ${recipient.userId}, token: ${recipient.pushToken || 'NULL'}`,
+    );
+
+    if (!recipient.pushToken || !Expo.isExpoPushToken(recipient.pushToken)) {
+      return;
+    }
+
+    const message: ExpoPushMessage = {
+      to: recipient.pushToken,
+      priority: 'high',
+      ttl: 30,
+      data: {
+        type: 'call_cancelled',
+        roomId,
+        callId,
+      },
+    };
+
+    try {
+      const tickets = await this.expo.sendPushNotificationsAsync([message]);
+      this.logger.log(`[PushNotificationService] Arama iptal push yanıtı: ${JSON.stringify(tickets)}`);
+    } catch (error) {
+      this.logger.error('[PushNotificationService] ❌ Expo arama iptal bildirimi gönderilirken hata:', error);
     }
   }
 }

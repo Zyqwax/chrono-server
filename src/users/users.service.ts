@@ -1,4 +1,4 @@
-import { RoomType, Visibility } from '@prisma/client';
+import { RoomType } from '@prisma/client';
 import {
   BadRequestException,
   ConflictException,
@@ -435,19 +435,23 @@ export class UsersService {
     }
   }
 
-  async updatePushToken(userId: string, pushToken?: string | null) {
+  async updatePushToken(userId: string, pushToken?: string | null, platform?: string | null) {
     const cleanToken = pushToken ? pushToken.trim() : null;
+    const cleanPlatform = platform ? platform.trim().toLowerCase() : null;
     this.logger.log(
-      `[UsersService] updatePushToken çağrıldı -> userId: ${userId}, pushToken: ${cleanToken || 'NULL'}`,
+      `[UsersService] updatePushToken çağrıldı -> userId: ${userId}, pushToken: ${cleanToken || 'NULL'}, platform: ${cleanPlatform || 'NULL'}`,
     );
     const updated = await this.prisma.user.update({
       where: { id: userId },
-      data: { pushToken: cleanToken },
-      select: { id: true, username: true, pushToken: true },
+      data: {
+        pushToken: cleanToken,
+        pushPlatform: cleanPlatform,
+      },
+      select: { id: true, username: true, pushToken: true, pushPlatform: true },
     });
     this.logger.log(
-      `[UsersService] pushToken veritabanına yazıldı -> ${updated.username} (${updated.id}) = ${updated.pushToken || 'NULL'}`,
+      `[UsersService] pushToken veritabanına yazıldı -> ${updated.username} (${updated.id}) = ${updated.pushToken || 'NULL'} [${updated.pushPlatform || 'NULL'}]`,
     );
-    return { id: updated.id, pushToken: updated.pushToken };
+    return { id: updated.id, pushToken: updated.pushToken, pushPlatform: updated.pushPlatform };
   }
 }

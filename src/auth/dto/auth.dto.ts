@@ -33,6 +33,10 @@ export class RegisterDto {
   @IsOptional()
   @IsString()
   pushToken?: string;
+
+  @IsOptional()
+  @IsString()
+  platform?: string;
 }
 
 export class LoginDto {
@@ -45,6 +49,10 @@ export class LoginDto {
   @IsOptional()
   @IsString()
   pushToken?: string;
+
+  @IsOptional()
+  @IsString()
+  platform?: string;
 }
 
 export class CheckUserDto {
