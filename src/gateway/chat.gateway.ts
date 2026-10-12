@@ -549,12 +549,25 @@ export class ChatGateway
     void this.prisma.user
       .findUnique({
         where: { id: calleeId },
-        select: { id: true, username: true, pushToken: true },
+        select: {
+          id: true,
+          username: true,
+          pushToken: true,
+          settings: { select: { notifyCalls: true } },
+        },
       })
       .then((calleeUser) => {
         this.logger.log(
-          `[ChatGateway] call_start çağrıldı -> Arayan: ${userId}, Aranan: ${calleeUser?.username} (${calleeId}), callee pushToken: ${calleeUser?.pushToken || 'NULL'}`,
+          `[ChatGateway] call_start çağrıldı -> Arayan: ${userId}, Aranan: ${calleeUser?.username} (${calleeId}), callee pushToken: ${calleeUser?.pushToken || 'NULL'}, notifyCalls: ${calleeUser?.settings?.notifyCalls ?? true}`,
         );
+
+        if (calleeUser?.settings?.notifyCalls === false) {
+          this.logger.log(
+            `[ChatGateway] 🔕 Aranan kullanıcı (${calleeUser.username}) arama bildirimlerini kapattığı için çağrı push bildirimi gönderilmedi.`,
+          );
+          return;
+        }
+
         if (calleeUser?.pushToken) {
           const callerName =
             payload.caller?.displayName ||

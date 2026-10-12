@@ -105,51 +105,127 @@ export class MessagesService {
       );
 
       if (inactiveUserIds.length > 0) {
-        void this.prisma.user
-          .findMany({
+        const now = new Date();
+        const isDirect = membership.room.type === RoomType.DIRECT;
+
+        void Promise.all([
+          // 1. Bu odayı sessize almamış üyeler (mutedUntil null veya süresi geçmiş)
+          this.prisma.roomMember.findMany({
+            where: {
+              roomId,
+              userId: { in: inactiveUserIds },
+              OR: [{ mutedUntil: null }, { mutedUntil: { lte: now } }],
+            },
+            select: { userId: true },
+          }),
+          // 2. Kullanıcıların push token'ları ve bildirim ayarları
+          this.prisma.user.findMany({
             where: {
               id: { in: inactiveUserIds },
             },
-            select: { id: true, username: true, pushToken: true },
-          })
-          .then((targetUsers) => {
-            const withToken = targetUsers.filter((u) => Boolean(u.pushToken));
-            const withoutToken = targetUsers.filter((u) => !u.pushToken);
+            select: {
+              id: true,
+              username: true,
+              pushToken: true,
+              settings: {
+                select: {
+                  notifyPrivate: true,
+                  notifyRooms: true,
+                  messagePreview: true,
+                },
+              },
+            },
+          }),
+        ])
+          .then(([unmutedMembers, targetUsers]) => {
+            const unmutedUserIds = new Set(unmutedMembers.map((m) => m.userId));
+            const eligibleUsers: Array<{
+              id: string;
+              username: string;
+              pushToken: string;
+              preview: boolean;
+            }> = [];
 
-            if (withoutToken.length > 0) {
-              this.logger.warn(
-                `[MessagesService] ⚠️ Bildirim gönderilemeyen (DB'de pushToken'ı NULL olan) kullanıcılar: ${withoutToken.map((u) => `${u.username} (${u.id})`).join(', ')}`,
-              );
+            for (const u of targetUsers) {
+              if (!u.pushToken) {
+                this.logger.warn(
+                  `[MessagesService] ⚠️ Bildirim gönderilemeyen (DB'de pushToken'ı NULL olan) kullanıcı: ${u.username} (${u.id})`,
+                );
+                continue;
+              }
+
+              // Oda sessize alınmışsa push gönderme
+              if (!unmutedUserIds.has(u.id)) {
+                this.logger.log(
+                  `[MessagesService] 🔕 Kullanıcı (${u.username}) bu odayı sessize aldığı için push bildirimi gönderilmedi.`,
+                );
+                continue;
+              }
+
+              // Kullanıcı bildirim ayarları kontrolü
+              const userSettings = u.settings;
+              if (isDirect && userSettings?.notifyPrivate === false) {
+                this.logger.log(
+                  `[MessagesService] 🔕 Kullanıcı (${u.username}) kişisel sohbet bildirimlerini kapattığı için push bildirimi gönderilmedi.`,
+                );
+                continue;
+              }
+              if (!isDirect && userSettings?.notifyRooms === false) {
+                this.logger.log(
+                  `[MessagesService] 🔕 Kullanıcı (${u.username}) sohbet odası bildirimlerini kapattığı için push bildirimi gönderilmedi.`,
+                );
+                continue;
+              }
+
+              eligibleUsers.push({
+                id: u.id,
+                username: u.username,
+                pushToken: u.pushToken,
+                preview: userSettings?.messagePreview ?? true,
+              });
             }
 
-            const recipients = withToken.map((u) => ({
-              userId: u.id,
-              pushToken: u.pushToken!,
-            }));
-
-            if (recipients.length > 0) {
+            if (eligibleUsers.length > 0) {
               this.logger.log(
-                `[MessagesService] 📲 Push bildirimi gönderilecek: ${withToken.map((u) => `${u.username} -> ${u.pushToken}`).join(', ')}`,
+                `[MessagesService] 📲 Push bildirimi gönderilecek: ${eligibleUsers.map((u) => `${u.username} -> ${u.pushToken}`).join(', ')}`,
               );
               const senderName =
                 message.sender?.displayName ||
                 message.sender?.username ||
                 'Chrono';
 
-              const pushBody =
-                type === MessageType.IMAGE
-                  ? '📷 Fotoğraf'
-                  : content;
+              const defaultBody =
+                type === MessageType.IMAGE ? '📷 Fotoğraf' : content;
 
-              void this.pushNotifications.sendChatMessagePush({
-                recipients,
-                senderName,
-                body: pushBody,
-                roomId,
-              });
+              const withPreview = eligibleUsers.filter((u) => u.preview);
+              const withoutPreview = eligibleUsers.filter((u) => !u.preview);
+
+              if (withPreview.length > 0) {
+                void this.pushNotifications.sendChatMessagePush({
+                  recipients: withPreview.map((u) => ({
+                    userId: u.id,
+                    pushToken: u.pushToken,
+                  })),
+                  senderName,
+                  body: defaultBody,
+                  roomId,
+                });
+              }
+
+              if (withoutPreview.length > 0) {
+                void this.pushNotifications.sendChatMessagePush({
+                  recipients: withoutPreview.map((u) => ({
+                    userId: u.id,
+                    pushToken: u.pushToken,
+                  })),
+                  senderName,
+                  body: 'Yeni bir mesajınız var',
+                  roomId,
+                });
+              }
             } else {
-              this.logger.warn(
-                `[MessagesService] ⚠️ Hiçbir inaktif kullanıcının geçerli pushToken'ı yok, push gönderilmedi.`,
+              this.logger.log(
+                `[MessagesService] Filtreleme sonrası gönderilecek uygun push alıcısı bulunamadı (odalar sessizde, ayarlar kapalı veya token yok).`,
               );
             }
           })
