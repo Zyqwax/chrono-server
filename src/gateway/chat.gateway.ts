@@ -553,12 +553,13 @@ export class ChatGateway
           id: true,
           username: true,
           pushToken: true,
+          pushPlatform: true,
           settings: { select: { notifyCalls: true } },
         },
       })
       .then((calleeUser) => {
         this.logger.log(
-          `[ChatGateway] call_start çağrıldı -> Arayan: ${userId}, Aranan: ${calleeUser?.username} (${calleeId}), callee pushToken: ${calleeUser?.pushToken || 'NULL'}, notifyCalls: ${calleeUser?.settings?.notifyCalls ?? true}`,
+          `[ChatGateway] call_start çağrıldı -> Arayan: ${userId}, Aranan: ${calleeUser?.username} (${calleeId}), callee pushToken: ${calleeUser?.pushToken || 'NULL'}, platform: ${calleeUser?.pushPlatform || 'NULL'}, notifyCalls: ${calleeUser?.settings?.notifyCalls ?? true}`,
         );
 
         if (calleeUser?.settings?.notifyCalls === false) {
@@ -574,7 +575,11 @@ export class ChatGateway
             payload.caller?.username ||
             'Chrono';
           void this.pushNotifications.sendIncomingCallPush({
-            recipient: { userId: calleeId, pushToken: calleeUser.pushToken },
+            recipient: {
+              userId: calleeId,
+              pushToken: calleeUser.pushToken,
+              platform: calleeUser.pushPlatform,
+            },
             callerName,
             roomId: data.roomId,
             callId: call.callId,
@@ -616,7 +621,45 @@ export class ChatGateway
       ...payload,
       acceptedBySocket: client.id,
     });
+
+    // Alıcı bu cihazdan cevapladı, diğer olası arka plan/cihaz bildirimlerini temizle
+    void this.prisma.user
+      .findUnique({
+        where: { id: call.calleeId },
+        select: { id: true, pushToken: true, pushPlatform: true },
+      })
+      .then((calleeUser) => {
+        if (calleeUser?.pushToken) {
+          void this.pushNotifications.sendCallCancelledPush({
+            recipient: {
+              userId: calleeUser.id,
+              pushToken: calleeUser.pushToken,
+              platform: calleeUser.pushPlatform,
+            },
+            callId: call.callId,
+            roomId: call.roomId,
+          });
+        }
+      })
+      .catch(() => {});
+
     return { ok: true, call: payload };
+  }
+
+  /**
+   * Hem WebSocket hem REST API (arka plan bildirim aksiyonu) üzerinden çağrılabilen ortak arama reddetme metodu.
+   */
+  async declineCall(userId: string, callId: string): Promise<boolean> {
+    const call = this.calls.get(callId);
+    if (!call || (call.calleeId !== userId && call.callerId !== userId)) return false;
+    const reason =
+      call.state === 'active'
+        ? 'ended'
+        : call.callerId === userId
+          ? 'cancelled'
+          : 'declined';
+    await this.finishCall(call, reason);
+    return true;
   }
 
   @SubscribeMessage('call_decline')
@@ -625,16 +668,8 @@ export class ChatGateway
     @MessageBody() data: { callId: string },
   ) {
     const userId = client.data?.userId;
-    const call = this.calls.get(data?.callId);
-    if (!call || (call.calleeId !== userId && call.callerId !== userId)) return { ok: false };
-    const reason =
-      call.state === 'active'
-        ? 'ended'
-        : call.callerId === userId
-          ? 'cancelled'
-          : 'declined';
-    await this.finishCall(call, reason);
-    return { ok: true };
+    const ok = await this.declineCall(userId, data?.callId);
+    return { ok };
   }
 
   @SubscribeMessage('call_end')
@@ -668,6 +703,33 @@ export class ChatGateway
     reason: 'ended' | 'declined' | 'missed' | 'cancelled',
   ) {
     if (!this.calls.has(call.callId)) return;
+
+    // Eğer arama çalma (ringing) aşamasında sonlandıysa (iptal, meşgul, zaman aşımı vb.),
+    // aranan kullanıcının cihazındaki çalma bildirimini temizlemek için call_cancelled push'u at
+    if (call.state === 'ringing') {
+      void this.prisma.user
+        .findUnique({
+          where: { id: call.calleeId },
+          select: { id: true, pushToken: true, pushPlatform: true },
+        })
+        .then((calleeUser) => {
+          if (calleeUser?.pushToken) {
+            void this.pushNotifications.sendCallCancelledPush({
+              recipient: {
+                userId: calleeUser.id,
+                pushToken: calleeUser.pushToken,
+                platform: calleeUser.pushPlatform,
+              },
+              callId: call.callId,
+              roomId: call.roomId,
+            });
+          }
+        })
+        .catch((err) => {
+          this.logger.error(`sendCallCancelledPush hatası: ${String(err)}`);
+        });
+    }
+
     this.calls.delete(call.callId);
     if (call.timeout) clearTimeout(call.timeout);
 
