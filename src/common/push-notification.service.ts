@@ -133,7 +133,7 @@ export class PushNotificationService {
         video: isVideo,
         callerName,
       },
-      channelId: 'calls_channel',
+      channelId: 'calls_channel_v2',
     };
 
     try {
