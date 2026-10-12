@@ -122,7 +122,7 @@ export class PushNotificationService {
 
     const message: ExpoPushMessage = {
       to: recipient.pushToken,
-      sound: 'default',
+      sound: undefined,
       priority: 'high',
       title: callerName,
       body: isVideo ? '📹 Gelen görüntülü arama...' : '📞 Gelen sesli arama...',
