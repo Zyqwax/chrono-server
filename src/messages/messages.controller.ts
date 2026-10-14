@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -7,8 +8,12 @@ import {
   Patch,
   Post,
   Query,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { MessagesService } from './messages.service';
@@ -18,6 +23,23 @@ import { EditMessageDto, SendMessageDto } from './dto/message.dto';
 @Controller('messages')
 export class MessagesController {
   constructor(private messagesService: MessagesService) {}
+
+  @Post('upload-media')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 25 * 1024 * 1024 },
+    }),
+  )
+  uploadMedia(
+    @CurrentUser() user: { id: string },
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) {
+      throw new BadRequestException('Dosya seçilmedi');
+    }
+    return this.messagesService.uploadMedia(user.id, file);
+  }
 
   @Post('room/:roomId')
   sendMessage(

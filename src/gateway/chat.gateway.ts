@@ -310,6 +310,7 @@ export class ChatGateway
     data: {
       roomId: string;
       content?: string;
+      type?: MessageType;
       ciphertext?: string;
       nonce?: string;
       senderPublicKey?: string;
@@ -322,6 +323,7 @@ export class ChatGateway
     try {
       const message = await this.messagesService.sendMessage(data.roomId, userId, {
         content: data.content,
+        type: data.type,
         ciphertext: data.ciphertext,
         nonce: data.nonce,
         senderPublicKey: data.senderPublicKey,

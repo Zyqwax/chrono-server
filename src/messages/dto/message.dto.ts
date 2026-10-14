@@ -1,10 +1,15 @@
-import { IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsEnum, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
+import { MessageType } from '@prisma/client';
 
 export class SendMessageDto {
   @IsString()
   @IsOptional()
   @MaxLength(4096)
   content?: string;
+
+  @IsEnum(MessageType)
+  @IsOptional()
+  type?: MessageType;
 
   @IsString()
   @IsOptional()

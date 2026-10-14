@@ -15,6 +15,7 @@ enum Role {
 enum MessageType {
   TEXT
   IMAGE
+  AUDIO
   SYSTEM
   CALL
 }

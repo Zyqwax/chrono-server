@@ -11,6 +11,7 @@ import { RealtimeService } from '../common/realtime.service';
 import { messageInclude } from '../common/constants';
 import { RoomsService, sanitizeMessage } from '../rooms/rooms.service';
 import { PushNotificationService } from '../common/push-notification.service';
+import { CloudinaryService } from '../common/cloudinary.service';
 import { SendMessageDto } from './dto/message.dto';
 
 @Injectable()
@@ -22,7 +23,54 @@ export class MessagesService {
     private realtime: RealtimeService,
     private rooms: RoomsService,
     private pushNotifications: PushNotificationService,
+    private cloudinary: CloudinaryService,
   ) {}
+
+  async uploadMedia(userId: string, file: Express.Multer.File) {
+    if (!file || !file.buffer) {
+      throw new BadRequestException('Dosya verisi bulunamadı');
+    }
+
+    const mime = (file.mimetype || '').toLowerCase();
+    const originalName = (file.originalname || '').toLowerCase();
+    const isImage = mime.startsWith('image/');
+    const isAudio =
+      mime.startsWith('audio/') ||
+      mime.includes('audio') ||
+      mime === 'video/mp4' ||
+      originalName.endsWith('.m4a') ||
+      originalName.endsWith('.aac') ||
+      originalName.endsWith('.mp3') ||
+      originalName.endsWith('.wav') ||
+      originalName.endsWith('.ogg');
+
+    if (!isImage && !isAudio) {
+      throw new BadRequestException(
+        'Desteklenmeyen dosya türü. Yalnızca görsel ve ses dosyaları yüklenebilir.',
+      );
+    }
+
+    if (isImage) {
+      const res = await this.cloudinary.uploadChatImage(file.buffer);
+      return {
+        url: res.secure_url,
+        type: MessageType.IMAGE,
+        width: res.width,
+        height: res.height,
+        format: res.format,
+        bytes: res.bytes,
+      };
+    } else {
+      const res = await this.cloudinary.uploadChatAudio(file.buffer);
+      return {
+        url: res.secure_url,
+        type: MessageType.AUDIO,
+        duration: res.duration || null,
+        format: res.format,
+        bytes: res.bytes,
+      };
+    }
+  }
 
   async sendMessage(
     roomId: string,
@@ -31,6 +79,7 @@ export class MessagesService {
     type: MessageType = MessageType.TEXT,
   ) {
     const membership = await this.rooms.requireMembership(userId, roomId);
+    const messageType = dto.type || type || MessageType.TEXT;
     const content = (dto.content ?? '').trim();
     const ciphertext = dto.ciphertext?.trim() || null;
     const nonce = dto.nonce?.trim() || null;
@@ -45,7 +94,7 @@ export class MessagesService {
 
     if (dto.replyToId) {
       const target = await this.prisma.message.findFirst({
-        where: { id: dto.replyToId, roomId },
+        where: { id: dto.replyToId, roomId, deletedAt: null },
         select: { id: true },
       });
       if (!target) dto.replyToId = undefined;
@@ -59,7 +108,7 @@ export class MessagesService {
         ciphertext,
         nonce,
         senderPublicKey,
-        type,
+        type: messageType,
         replyToId: dto.replyToId,
       },
       include: messageInclude,
@@ -204,8 +253,16 @@ export class MessagesService {
                 'Chrono';
 
               const defaultBody = ciphertext
-                ? (type === MessageType.IMAGE ? '📷 🔒 Yeni bir fotoğraf' : '🔒 Yeni bir mesaj')
-                : (type === MessageType.IMAGE ? '📷 Fotoğraf' : content);
+                ? (messageType === MessageType.IMAGE
+                    ? '📷 🔒 Yeni bir fotoğraf'
+                    : messageType === MessageType.AUDIO
+                      ? '🎤 🔒 Sesli mesaj'
+                      : '🔒 Yeni bir mesaj')
+                : (messageType === MessageType.IMAGE
+                    ? '📷 Fotoğraf'
+                    : messageType === MessageType.AUDIO
+                      ? '🎤 Sesli mesaj'
+                      : content);
 
               const pushData = {
                 messageId: message.id,
