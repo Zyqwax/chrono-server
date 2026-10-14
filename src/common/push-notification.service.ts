@@ -12,6 +12,7 @@ export interface SendChatMessagePushOptions {
   senderName: string;
   body: string;
   roomId: string;
+  data?: Record<string, any>;
 }
 
 export interface SendCallPushOptions {
@@ -45,6 +46,7 @@ export class PushNotificationService {
     senderName,
     body,
     roomId,
+    data,
   }: SendChatMessagePushOptions): Promise<void> {
     this.logger.log(
       `[PushNotificationService] sendChatMessagePush -> Gelen alıcı sayısı: ${recipients.length}, Gönderen: "${senderName}", Oda: ${roomId}`,
@@ -81,6 +83,7 @@ export class PushNotificationService {
       data: {
         roomId,
         type: 'message',
+        ...(data || {}),
       },
       channelId: 'chat-messages',
       collapseId: `room_${roomId}`,

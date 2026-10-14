@@ -73,4 +73,9 @@ export class RealtimeService {
   leaveUserFrom(userId: string, room: string) {
     this.server?.in(`user:${userId}`).socketsLeave(room);
   }
+
+  /** Kullanıcının tüm açık soket bağlantılarını anında sonlandırır */
+  disconnectUser(userId: string) {
+    this.server?.in(`user:${userId}`).disconnectSockets(true);
+  }
 }

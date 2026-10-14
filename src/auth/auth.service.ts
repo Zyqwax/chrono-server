@@ -6,7 +6,9 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
+import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { RealtimeService } from '../common/realtime.service';
 import { LoginDto, RegisterDto } from './dto/auth.dto';
 
 @Injectable()
@@ -16,6 +18,7 @@ export class AuthService {
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
+    private realtime: RealtimeService,
   ) {}
 
   async checkUser(identifier: string) {
@@ -57,6 +60,7 @@ export class AuthService {
 
     const salt = await bcrypt.genSalt(10);
     const passwordHash = await bcrypt.hash(dto.password, salt);
+    const activeSessionId = randomUUID();
 
     const user = await this.prisma.user.create({
       data: {
@@ -67,6 +71,11 @@ export class AuthService {
         avatarUrl: `https://api.dicebear.com/7.x/bottts/png?seed=${encodeURIComponent(dto.username)}`,
         pushToken: dto.pushToken ? dto.pushToken.trim() : null,
         pushPlatform: dto.platform ? dto.platform.trim().toLowerCase() : null,
+        activeSessionId,
+        publicKey: dto.publicKey ? dto.publicKey.trim() : null,
+        encryptedPrivateKey: dto.encryptedPrivateKey ? dto.encryptedPrivateKey.trim() : null,
+        keyBackupSalt: dto.keyBackupSalt ? dto.keyBackupSalt.trim() : null,
+        keyBackupNonce: dto.keyBackupNonce ? dto.keyBackupNonce.trim() : null,
       },
       select: {
         id: true,
@@ -77,19 +86,38 @@ export class AuthService {
         status: true,
         pushToken: true,
         pushPlatform: true,
+        publicKey: true,
+        encryptedPrivateKey: true,
+        keyBackupSalt: true,
+        keyBackupNonce: true,
         createdAt: true,
       },
     });
 
     this.logger.log(
-      `[AuthService] Yeni kullanıcı kaydedildi: ${user.username} (${user.id}) -> pushToken: ${user.pushToken || 'NULL'}, platform: ${user.pushPlatform || 'NULL'}`,
+      `[AuthService] Yeni kullanıcı kaydedildi: ${user.username} (${user.id}) -> activeSessionId: ${activeSessionId}`,
     );
 
-    const token = this.generateToken(user.id, user.email);
+    const token = this.generateToken(user.id, user.email, activeSessionId);
 
     return {
-      user,
+      user: {
+        id: user.id,
+        email: user.email,
+        username: user.username,
+        displayName: user.displayName,
+        avatarUrl: user.avatarUrl,
+        status: user.status,
+        pushToken: user.pushToken,
+        publicKey: user.publicKey,
+      },
       accessToken: token,
+      keyBackup: {
+        publicKey: user.publicKey,
+        encryptedPrivateKey: user.encryptedPrivateKey,
+        keyBackupSalt: user.keyBackupSalt,
+        keyBackupNonce: user.keyBackupNonce,
+      },
     };
   }
 
@@ -113,40 +141,62 @@ export class AuthService {
       throw new UnauthorizedException('Geçersiz kullanıcı adı veya şifre');
     }
 
-    let currentPushToken = user.pushToken;
+    const cleanPushToken = dto.pushToken ? dto.pushToken.trim() : null;
+    const cleanPlatform = dto.platform ? dto.platform.trim().toLowerCase() : user.pushPlatform;
+    const newSessionId = randomUUID();
+
+    // 1. Önceki cihaz oturumunu sonlandır: WebSocket'e 'session_expired' bildir ve bağlantıyı kes
     this.logger.log(
-      `[AuthService] Kullanıcı giriş yaptı: ${user.username} (${user.id}) -> İstekten gelen pushToken: ${dto.pushToken ? dto.pushToken.trim() : 'YOK'}, DB'deki token: ${user.pushToken || 'YOK'}`,
+      `[AuthService] Yeni oturum açılıyor. Eski oturum düşürülüyor: ${user.username} (${user.id}) -> yeni sessionId: ${newSessionId}`,
     );
+    this.realtime.toUser(user.id, 'session_expired', {
+      reason: 'Yeni bir cihazda oturum açıldı. Bu cihazdaki oturum sonlandırıldı.',
+    });
+    this.realtime.disconnectUser(user.id);
 
-    if (dto.pushToken && (dto.pushToken.trim() !== user.pushToken || dto.platform)) {
-      const cleanToken = dto.pushToken.trim();
-      const cleanPlatform = dto.platform ? dto.platform.trim().toLowerCase() : user.pushPlatform;
-      await this.prisma.user.update({
-        where: { id: user.id },
-        data: {
-          pushToken: cleanToken,
-          pushPlatform: cleanPlatform,
-        },
-      });
-      currentPushToken = cleanToken;
-      this.logger.log(
-        `[AuthService] Kullanıcı ${user.username} için pushToken güncellendi: ${currentPushToken} [${cleanPlatform || 'NULL'}]`,
-      );
-    }
+    // 2. Kullanıcının aktif oturumunu ve tek push token bilgisini atomik güncelle
+    const updatedUser = await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        activeSessionId: newSessionId,
+        pushToken: cleanPushToken ?? user.pushToken,
+        pushPlatform: cleanPlatform,
+      },
+      select: {
+        id: true,
+        email: true,
+        username: true,
+        displayName: true,
+        avatarUrl: true,
+        status: true,
+        pushToken: true,
+        publicKey: true,
+        encryptedPrivateKey: true,
+        keyBackupSalt: true,
+        keyBackupNonce: true,
+      },
+    });
 
-    const token = this.generateToken(user.id, user.email);
+    const token = this.generateToken(updatedUser.id, updatedUser.email, newSessionId);
 
     return {
       user: {
-        id: user.id,
-        email: user.email,
-        username: user.username,
-        displayName: user.displayName,
-        avatarUrl: user.avatarUrl,
-        status: user.status,
-        pushToken: currentPushToken,
+        id: updatedUser.id,
+        email: updatedUser.email,
+        username: updatedUser.username,
+        displayName: updatedUser.displayName,
+        avatarUrl: updatedUser.avatarUrl,
+        status: updatedUser.status,
+        pushToken: updatedUser.pushToken,
+        publicKey: updatedUser.publicKey,
       },
       accessToken: token,
+      keyBackup: {
+        publicKey: updatedUser.publicKey,
+        encryptedPrivateKey: updatedUser.encryptedPrivateKey,
+        keyBackupSalt: updatedUser.keyBackupSalt,
+        keyBackupNonce: updatedUser.keyBackupNonce,
+      },
     };
   }
 
@@ -161,6 +211,7 @@ export class AuthService {
         avatarUrl: true,
         status: true,
         bio: true,
+        publicKey: true,
         createdAt: true,
       },
     });
@@ -172,9 +223,9 @@ export class AuthService {
     return user;
   }
 
-  private generateToken(userId: string, email: string) {
+  private generateToken(userId: string, email: string, sessionId: string) {
     return this.jwtService.sign(
-      { sub: userId, email },
+      { sub: userId, email, sessionId },
       {
         secret: process.env.JWT_SECRET || 'super-secret-chrono-jwt-key-2026',
         expiresIn: '7d',

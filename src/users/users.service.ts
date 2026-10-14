@@ -30,6 +30,10 @@ export const meSelect = {
   status: true,
   pushToken: true,
   lastSeenAt: true,
+  publicKey: true,
+  encryptedPrivateKey: true,
+  keyBackupSalt: true,
+  keyBackupNonce: true,
   createdAt: true,
 } as const;
 

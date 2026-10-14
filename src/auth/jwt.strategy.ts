@@ -13,7 +13,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
-  async validate(payload: { sub: string; email: string }) {
+  async validate(payload: { sub: string; email: string; sessionId?: string }) {
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
       select: {
@@ -23,11 +23,21 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         displayName: true,
         avatarUrl: true,
         status: true,
+        activeSessionId: true,
       },
     });
 
     if (!user) {
       throw new UnauthorizedException('Kullanıcı bulunamadı');
+    }
+
+    // Tek cihaz oturumu kontrolü: Eğer token'da sessionId varsa ve kullanıcının DB'deki
+    // aktif oturumu ile eşleşmiyorsa eski cihazın erişimini anında kes
+    if (payload.sessionId && user.activeSessionId && payload.sessionId !== user.activeSessionId) {
+      throw new UnauthorizedException({
+        message: 'Oturumunuz başka bir cihazda açıldığı için sonlandırıldı.',
+        code: 'SESSION_EXPIRED',
+      });
     }
 
     return user;

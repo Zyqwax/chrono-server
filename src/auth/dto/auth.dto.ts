@@ -37,6 +37,22 @@ export class RegisterDto {
   @IsOptional()
   @IsString()
   platform?: string;
+
+  @IsOptional()
+  @IsString()
+  publicKey?: string;
+
+  @IsOptional()
+  @IsString()
+  encryptedPrivateKey?: string;
+
+  @IsOptional()
+  @IsString()
+  keyBackupSalt?: string;
+
+  @IsOptional()
+  @IsString()
+  keyBackupNonce?: string;
 }
 
 export class LoginDto {

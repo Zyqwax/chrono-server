@@ -53,6 +53,11 @@ model User {
   lastSeenAt   DateTime?
   pushToken    String?
   pushPlatform String?
+  activeSessionId String?
+  publicKey    String?
+  encryptedPrivateKey String?
+  keyBackupSalt String?
+  keyBackupNonce String?
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
@@ -158,7 +163,10 @@ model Message {
   id        String      @id @default(uuid())
   roomId    String
   senderId  String
-  content   String
+  content   String?
+  ciphertext String?
+  nonce     String?
+  senderPublicKey String?
   type      MessageType @default(TEXT)
   replyToId String?
   editedAt  DateTime?

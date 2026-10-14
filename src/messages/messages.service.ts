@@ -32,9 +32,15 @@ export class MessagesService {
   ) {
     const membership = await this.rooms.requireMembership(userId, roomId);
     const content = (dto.content ?? '').trim();
-    if (!content) throw new BadRequestException('Mesaj boş olamaz');
-    if (content.length > 4096) {
-      throw new BadRequestException('Mesaj en fazla 4096 karakter olabilir');
+    const ciphertext = dto.ciphertext?.trim() || null;
+    const nonce = dto.nonce?.trim() || null;
+    const senderPublicKey = dto.senderPublicKey?.trim() || null;
+
+    if (!content && !ciphertext) {
+      throw new BadRequestException('Mesaj boş olamaz');
+    }
+    if (content.length > 4096 || (ciphertext && ciphertext.length > 65536)) {
+      throw new BadRequestException('Mesaj izin verilen sınırı aşıyor');
     }
 
     if (dto.replyToId) {
@@ -49,7 +55,10 @@ export class MessagesService {
       data: {
         roomId,
         senderId: userId,
-        content,
+        content: content || null,
+        ciphertext,
+        nonce,
+        senderPublicKey,
         type,
         replyToId: dto.replyToId,
       },
@@ -194,8 +203,17 @@ export class MessagesService {
                 message.sender?.username ||
                 'Chrono';
 
-              const defaultBody =
-                type === MessageType.IMAGE ? '📷 Fotoğraf' : content;
+              const defaultBody = ciphertext
+                ? (type === MessageType.IMAGE ? '📷 🔒 Yeni bir fotoğraf' : '🔒 Yeni bir mesaj')
+                : (type === MessageType.IMAGE ? '📷 Fotoğraf' : content);
+
+              const pushData = {
+                messageId: message.id,
+                senderId: userId,
+                ciphertext,
+                nonce,
+                senderPublicKey,
+              };
 
               const withPreview = eligibleUsers.filter((u) => u.preview);
               const withoutPreview = eligibleUsers.filter((u) => !u.preview);
@@ -209,6 +227,7 @@ export class MessagesService {
                   senderName,
                   body: defaultBody,
                   roomId,
+                  data: pushData,
                 });
               }
 
@@ -221,6 +240,7 @@ export class MessagesService {
                   senderName,
                   body: 'Yeni bir mesajınız var',
                   roomId,
+                  data: pushData,
                 });
               }
             } else {
@@ -272,12 +292,13 @@ export class MessagesService {
       include: messageInclude,
     });
 
-    const sanitized = messages.map((m) =>
-      sanitizeMessage({
-        ...m,
-        replyTo: m.replyTo ? sanitizeMessage(m.replyTo) : null,
-      }),
-    );
+    const sanitized = messages.map((m) => {
+      const sanitizedReplyTo = m.replyTo ? sanitizeMessage(m.replyTo) : null;
+      return {
+        ...sanitizeMessage(m),
+        replyTo: sanitizedReplyTo,
+      };
+    });
 
     // after kullanıldığında asc çekip tekrar desc sıralayarak tutarlı dönüş sağla
     return after ? sanitized.reverse() : sanitized;

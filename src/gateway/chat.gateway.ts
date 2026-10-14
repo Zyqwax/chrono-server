@@ -82,11 +82,19 @@ export class ChatGateway
       const userId: string = payload.sub;
       client.data.userId = userId;
 
-      const exists = await this.prisma.user.findUnique({
+      const user = await this.prisma.user.findUnique({
         where: { id: userId },
-        select: { id: true },
+        select: { id: true, activeSessionId: true },
       });
-      if (!exists) return client.disconnect();
+      if (!user) return client.disconnect(true);
+
+      // Tek cihaz oturumu kontrolü: Token'daki sessionId ile DB'deki uyuşmuyorsa bağlantıyı reddet
+      if (payload.sessionId && user.activeSessionId && payload.sessionId !== user.activeSessionId) {
+        client.emit('session_expired', {
+          reason: 'Bu hesap başka bir cihazda açıldı. Oturumunuz sonlandırıldı.',
+        });
+        return client.disconnect(true);
+      }
 
       await client.join(`user:${userId}`);
 
@@ -298,13 +306,25 @@ export class ChatGateway
   @SubscribeMessage('send_message')
   async handleSendMessage(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { roomId: string; content: string; replyToId?: string; tempId?: string },
+    @MessageBody()
+    data: {
+      roomId: string;
+      content?: string;
+      ciphertext?: string;
+      nonce?: string;
+      senderPublicKey?: string;
+      replyToId?: string;
+      tempId?: string;
+    },
   ) {
     const userId = client.data?.userId;
     if (!userId) return { ok: false };
     try {
       const message = await this.messagesService.sendMessage(data.roomId, userId, {
         content: data.content,
+        ciphertext: data.ciphertext,
+        nonce: data.nonce,
+        senderPublicKey: data.senderPublicKey,
         replyToId: data.replyToId,
       });
       return { ok: true, message, tempId: data.tempId };

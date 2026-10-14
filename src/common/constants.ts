@@ -13,6 +13,7 @@ export const publicUserSelect = {
   bio: true,
   status: true,
   lastSeenAt: true,
+  publicKey: true,
 } as const;
 
 /** Mesaj gönderen için hafif seçim */
@@ -21,6 +22,7 @@ export const senderSelect = {
   username: true,
   displayName: true,
   avatarUrl: true,
+  publicKey: true,
 } as const;
 
 export const messageInclude = {
@@ -29,9 +31,12 @@ export const messageInclude = {
     select: {
       id: true,
       content: true,
+      ciphertext: true,
+      nonce: true,
+      senderPublicKey: true,
       type: true,
       deletedAt: true,
-      sender: { select: { id: true, displayName: true, username: true } },
+      sender: { select: { id: true, displayName: true, username: true, publicKey: true } },
     },
   },
 } as const;

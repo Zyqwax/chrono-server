@@ -2,9 +2,21 @@ import { IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
 
 export class SendMessageDto {
   @IsString()
-  @IsNotEmpty()
+  @IsOptional()
   @MaxLength(4096)
-  content: string;
+  content?: string;
+
+  @IsString()
+  @IsOptional()
+  ciphertext?: string;
+
+  @IsString()
+  @IsOptional()
+  nonce?: string;
+
+  @IsString()
+  @IsOptional()
+  senderPublicKey?: string;
 
   @IsString()
   @IsOptional()

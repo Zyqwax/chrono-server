@@ -40,11 +40,15 @@ type MembershipWithRoom = Prisma.RoomMemberGetPayload<{
 }>;
 
 /** Silinmiş mesajların içeriğini istemciye göndermeden önce temizler */
-export function sanitizeMessage<T extends { deletedAt: Date | null; content: string }>(
-  m: T,
-): T {
+export function sanitizeMessage<
+  T extends {
+    deletedAt: Date | null;
+    content?: string | null;
+    ciphertext?: string | null;
+  },
+>(m: T): T {
   if (!m.deletedAt) return m;
-  return { ...m, content: '' };
+  return { ...m, content: '', ciphertext: null };
 }
 
 @Injectable()
