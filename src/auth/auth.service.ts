@@ -224,12 +224,16 @@ export class AuthService {
   }
 
   private generateToken(userId: string, email: string, sessionId: string) {
+    const expiresIn = process.env.JWT_EXPIRES_IN || 'never';
+    const signOptions: Record<string, any> = {
+      secret: process.env.JWT_SECRET || 'super-secret-chrono-jwt-key-2026',
+    };
+    if (expiresIn && expiresIn !== 'never' && expiresIn !== 'none') {
+      signOptions.expiresIn = expiresIn;
+    }
     return this.jwtService.sign(
       { sub: userId, email, sessionId },
-      {
-        secret: process.env.JWT_SECRET || 'super-secret-chrono-jwt-key-2026',
-        expiresIn: '7d',
-      },
+      signOptions,
     );
   }
 }

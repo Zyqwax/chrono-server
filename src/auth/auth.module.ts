@@ -8,9 +8,18 @@ import { JwtStrategy } from './jwt.strategy';
 @Module({
   imports: [
     PassportModule.register({ defaultStrategy: 'jwt' }),
-    JwtModule.register({
-      secret: process.env.JWT_SECRET || 'super-secret-chrono-jwt-key-2026',
-      signOptions: { expiresIn: '7d' },
+    JwtModule.registerAsync({
+      useFactory: () => {
+        const expiresIn = process.env.JWT_EXPIRES_IN;
+        const signOptions: Record<string, any> = {};
+        if (expiresIn && expiresIn !== 'never' && expiresIn !== 'none') {
+          signOptions.expiresIn = expiresIn;
+        }
+        return {
+          secret: process.env.JWT_SECRET || 'super-secret-chrono-jwt-key-2026',
+          ...(signOptions.expiresIn ? { signOptions } : {}),
+        };
+      },
     }),
   ],
   controllers: [AuthController],
