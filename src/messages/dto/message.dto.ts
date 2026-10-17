@@ -34,3 +34,10 @@ export class EditMessageDto {
   @MaxLength(4096)
   content: string;
 }
+
+export class ReactMessageDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(32)
+  emoji: string;
+}

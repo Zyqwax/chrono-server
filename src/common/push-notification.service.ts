@@ -10,6 +10,7 @@ export interface PushRecipient {
 export interface SendChatMessagePushOptions {
   recipients: PushRecipient[];
   senderName: string;
+  title?: string;
   body: string;
   roomId: string;
   data?: Record<string, any>;
@@ -36,20 +37,22 @@ export class PushNotificationService {
 
   /**
    * Sohbet mesajı için Expo Push bildirimi gönderir.
-   * WhatsApp standardında:
-   * - Yüksek öncelik
-   * - Android: chat-messages kanalı ve room_${roomId} collapseId
-   * - iOS: room_${roomId} threadId
+   * WhatsApp / Telegram standardında:
+   * - Android: DATA-ONLY yüksek öncelikli push gönderilir; cihazda CHRONO_BG_NOTIFICATION_TASK
+   *   tarafından E2EE şifresi çözülür ve Notifee AndroidStyle.MESSAGING ile tek kartta stack'lenir.
+   * - iOS: threadId (room_${roomId}) ile gruplanmış görünür push gönderilir.
    */
   async sendChatMessagePush({
     recipients,
     senderName,
+    title,
     body,
     roomId,
     data,
   }: SendChatMessagePushOptions): Promise<void> {
+    const resolvedTitle = title || senderName;
     this.logger.log(
-      `[PushNotificationService] sendChatMessagePush -> Gelen alıcı sayısı: ${recipients.length}, Gönderen: "${senderName}", Oda: ${roomId}`,
+      `[PushNotificationService] sendChatMessagePush -> Gelen alıcı sayısı: ${recipients.length}, Başlık: "${resolvedTitle}", Gönderen: "${senderName}", Oda: ${roomId}`,
     );
 
     const validRecipients = recipients.filter((r) =>
@@ -74,21 +77,39 @@ export class PushNotificationService {
       `[PushNotificationService] ${validRecipients.length} cihaza Expo Push gönderiliyor: ${validRecipients.map((r) => r.pushToken).join(', ')}`,
     );
 
-    const messages: ExpoPushMessage[] = validRecipients.map((r) => ({
-      to: r.pushToken,
-      sound: 'default',
-      priority: 'high',
-      title: senderName,
-      body: body || 'Yeni bir mesajınız var',
-      data: {
+    const messages: ExpoPushMessage[] = validRecipients.map((r) => {
+      const isIos = r.platform?.toLowerCase() === 'ios';
+      const payloadData = {
         roomId,
         type: 'message',
+        title: resolvedTitle,
+        senderName,
+        body: body || 'Yeni mesaj',
         ...(data || {}),
-      },
-      channelId: 'chat-messages',
-      collapseId: `room_${roomId}`,
-      threadId: `room_${roomId}`,
-    }));
+      };
+
+      if (isIos) {
+        return {
+          to: r.pushToken,
+          sound: 'default',
+          priority: 'high',
+          title: resolvedTitle,
+          body: body || 'Yeni mesaj',
+          data: payloadData,
+          collapseId: `room_${roomId}`,
+          threadId: `room_${roomId}`,
+        };
+      }
+
+      // Android için DATA-ONLY push (title, body, channelId olmadan):
+      // FCM'in ham ve şifresi çözülmemiş ("🔒 Yeni bir mesaj") ikinci bir bildirim göstermesini engeller.
+      // Cihazdaki CHRONO_BG_NOTIFICATION_TASK görevi mesajın E2EE şifresini çözer ve Notifee MessagingStyle ile stack'ler.
+      return {
+        to: r.pushToken,
+        priority: 'high',
+        data: payloadData,
+      };
+    });
 
     const chunks = this.expo.chunkPushNotifications(messages);
 

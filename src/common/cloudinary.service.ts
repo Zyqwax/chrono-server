@@ -115,7 +115,7 @@ export class CloudinaryService {
           resource_type: 'image',
           transformation: [
             { width: 1920, height: 1920, crop: 'limit' },
-            { quality: 'auto:good', fetch_format: 'auto' },
+            { quality: 'auto:good', fetch_format: 'auto', flags: 'strip_profile' },
           ],
         },
         (error, result) => {
@@ -124,6 +124,46 @@ export class CloudinaryService {
             return reject(
               new BadRequestException(
                 `Cloudinary görsel yükleme hatası: ${error?.message || 'Görsel yüklenemedi'}`,
+              ),
+            );
+          }
+          resolve(result);
+        },
+      );
+      stream.end(buffer);
+    });
+  }
+
+  uploadChatSticker(
+    buffer: Buffer,
+    folder: string = 'chat_stickers',
+    publicId?: string,
+  ): Promise<UploadApiResponse> {
+    if (!this.checkConfigured()) {
+      throw new ServiceUnavailableException(
+        'Çıkartma yükleme servisi (Cloudinary) yapılandırılmamış.',
+      );
+    }
+
+    return new Promise((resolve, reject) => {
+      const stream = cloudinary.uploader.upload_stream(
+        {
+          folder: `chrono/${folder}`,
+          public_id: publicId,
+          overwrite: true,
+          resource_type: 'image',
+          format: 'webp',
+          transformation: [
+            { width: 512, height: 512, crop: 'limit' },
+            { quality: 'auto:good' },
+          ],
+        },
+        (error, result) => {
+          if (error || !result) {
+            this.logger.error(`Cloudinary sticker upload hatası: ${JSON.stringify(error)}`);
+            return reject(
+              new BadRequestException(
+                `Cloudinary çıkartma yükleme hatası: ${error?.message || 'Çıkartma yüklenemedi'}`,
               ),
             );
           }

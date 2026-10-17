@@ -39,6 +39,24 @@ export const messageInclude = {
       sender: { select: { id: true, displayName: true, username: true, publicKey: true } },
     },
   },
+  reactions: {
+    select: {
+      id: true,
+      messageId: true,
+      userId: true,
+      emoji: true,
+      createdAt: true,
+      user: {
+        select: {
+          id: true,
+          username: true,
+          displayName: true,
+          avatarUrl: true,
+        },
+      },
+    },
+    orderBy: { createdAt: 'asc' },
+  },
 } as const;
 
 export const makeDmKey = (a: string, b: string) => [a, b].sort().join('_');

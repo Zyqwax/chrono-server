@@ -16,6 +16,7 @@ enum MessageType {
   TEXT
   IMAGE
   AUDIO
+  STICKER
   SYSTEM
   CALL
 }
@@ -62,12 +63,13 @@ model User {
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
-  createdRooms Room[]        @relation("RoomCreator")
+  createdRooms Room[]            @relation("RoomCreator")
   memberships  RoomMember[]
   messages     Message[]
+  reactions    MessageReaction[]
   settings     UserSettings?
-  contacts     Contact[]     @relation("ContactOwner")
-  contactOf    Contact[]     @relation("ContactTarget")
+  contacts     Contact[]         @relation("ContactOwner")
+  contactOf    Contact[]         @relation("ContactTarget")
 
   @@map("users")
 }
@@ -175,11 +177,27 @@ model Message {
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
 
-  room    Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  sender  User      @relation(fields: [senderId], references: [id], onDelete: Cascade)
-  replyTo Message?  @relation("MessageReply", fields: [replyToId], references: [id], onDelete: SetNull)
-  replies Message[] @relation("MessageReply")
+  room      Room              @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  sender    User              @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  replyTo   Message?          @relation("MessageReply", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies   Message[]         @relation("MessageReply")
+  reactions MessageReaction[]
 
   @@index([roomId, createdAt])
   @@map("messages")
+}
+
+model MessageReaction {
+  id        String   @id @default(uuid())
+  messageId String
+  userId    String
+  emoji     String
+  createdAt DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+  @@index([messageId])
+  @@map("message_reactions")
 }

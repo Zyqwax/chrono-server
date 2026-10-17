@@ -344,6 +344,27 @@ export class ChatGateway
     return this.handleSendMessage(client, data);
   }
 
+  @SubscribeMessage('message_react')
+  async handleMessageReact(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { messageId: string; emoji: string },
+  ) {
+    const userId = client.data?.userId;
+    if (!userId || !data?.messageId || !data?.emoji) {
+      return { ok: false };
+    }
+    try {
+      const res = await this.messagesService.toggleReaction(
+        data.messageId,
+        userId,
+        data.emoji,
+      );
+      return { ok: true, ...res };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? 'Tepki eklenemedi' };
+    }
+  }
+
   @SubscribeMessage('mark_read')
   async handleMarkRead(
     @ConnectedSocket() client: Socket,

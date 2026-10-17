@@ -26,7 +26,11 @@ export class MessagesService {
     private cloudinary: CloudinaryService,
   ) {}
 
-  async uploadMedia(userId: string, file: Express.Multer.File) {
+  async uploadMedia(
+    userId: string,
+    file: Express.Multer.File,
+    requestedType?: string,
+  ) {
     if (!file || !file.buffer) {
       throw new BadRequestException('Dosya verisi bulunamadı');
     }
@@ -34,6 +38,9 @@ export class MessagesService {
     const mime = (file.mimetype || '').toLowerCase();
     const originalName = (file.originalname || '').toLowerCase();
     const isImage = mime.startsWith('image/');
+    const isStickerRequest =
+      requestedType?.toUpperCase() === 'STICKER' ||
+      originalName.includes('sticker');
     const isAudio =
       mime.startsWith('audio/') ||
       mime.includes('audio') ||
@@ -50,7 +57,17 @@ export class MessagesService {
       );
     }
 
-    if (isImage) {
+    if (isImage && isStickerRequest) {
+      const res = await this.cloudinary.uploadChatSticker(file.buffer);
+      return {
+        url: res.secure_url,
+        type: MessageType.STICKER,
+        width: res.width,
+        height: res.height,
+        format: res.format,
+        bytes: res.bytes,
+      };
+    } else if (isImage) {
       const res = await this.cloudinary.uploadChatImage(file.buffer);
       return {
         url: res.secure_url,
@@ -185,6 +202,7 @@ export class MessagesService {
               id: true,
               username: true,
               pushToken: true,
+              pushPlatform: true,
               settings: {
                 select: {
                   notifyPrivate: true,
@@ -201,6 +219,7 @@ export class MessagesService {
               id: string;
               username: string;
               pushToken: string;
+              platform: string | null;
               preview: boolean;
             }> = [];
 
@@ -239,6 +258,7 @@ export class MessagesService {
                 id: u.id,
                 username: u.username,
                 pushToken: u.pushToken,
+                platform: u.pushPlatform,
                 preview: userSettings?.messagePreview ?? true,
               });
             }
@@ -250,26 +270,45 @@ export class MessagesService {
               const senderName =
                 message.sender?.displayName ||
                 message.sender?.username ||
-                'Chrono';
+                'Kullanıcı';
+              const senderAvatar = message.sender?.avatarUrl || null;
+              const roomName = isDirect
+                ? senderName
+                : membership.room.name || 'Grup Sohbeti';
+              const roomIcon = isDirect
+                ? senderAvatar
+                : membership.room.iconUrl || senderAvatar;
 
-              const defaultBody = ciphertext
-                ? (messageType === MessageType.IMAGE
-                    ? '📷 🔒 Yeni bir fotoğraf'
-                    : messageType === MessageType.AUDIO
-                      ? '🎤 🔒 Sesli mesaj'
-                      : '🔒 Yeni bir mesaj')
-                : (messageType === MessageType.IMAGE
-                    ? '📷 Fotoğraf'
-                    : messageType === MessageType.AUDIO
-                      ? '🎤 Sesli mesaj'
-                      : content);
+              const rawContentPreview =
+                messageType === MessageType.IMAGE
+                  ? '📷 Fotoğraf'
+                  : messageType === MessageType.AUDIO
+                    ? '🎤 Sesli mesaj'
+                    : messageType === MessageType.STICKER
+                      ? '💟 Çıkartma'
+                      : ciphertext
+                        ? 'Yeni mesaj'
+                        : content;
+
+              const notificationTitle = isDirect ? senderName : roomName;
+              const formattedBodyWithPreview = isDirect
+                ? rawContentPreview
+                : `${senderName}: ${rawContentPreview}`;
 
               const pushData = {
                 messageId: message.id,
                 senderId: userId,
+                senderName,
+                senderAvatar,
+                roomName,
+                roomType: membership.room.type,
+                roomIcon,
+                messageType: String(messageType),
+                content: content || null,
                 ciphertext,
                 nonce,
                 senderPublicKey,
+                createdAt: message.createdAt.toISOString(),
               };
 
               const withPreview = eligibleUsers.filter((u) => u.preview);
@@ -280,11 +319,13 @@ export class MessagesService {
                   recipients: withPreview.map((u) => ({
                     userId: u.id,
                     pushToken: u.pushToken,
+                    platform: u.platform,
                   })),
                   senderName,
-                  body: defaultBody,
+                  title: notificationTitle,
+                  body: formattedBodyWithPreview,
                   roomId,
-                  data: pushData,
+                  data: { ...pushData, preview: true },
                 });
               }
 
@@ -293,11 +334,13 @@ export class MessagesService {
                   recipients: withoutPreview.map((u) => ({
                     userId: u.id,
                     pushToken: u.pushToken,
+                    platform: u.platform,
                   })),
                   senderName,
-                  body: 'Yeni bir mesajınız var',
+                  title: notificationTitle,
+                  body: 'Yeni mesaj',
                   roomId,
-                  data: pushData,
+                  data: { ...pushData, preview: false },
                 });
               }
             } else {
@@ -407,5 +450,80 @@ export class MessagesService {
     const memberIds = await this.rooms.getMemberIds(message.roomId);
     this.realtime.toUsers(memberIds, 'message_updated', updated);
     return { success: true };
+  }
+
+  async toggleReaction(messageId: string, userId: string, emoji: string) {
+    const cleanEmoji = (emoji ?? '').trim();
+    if (!cleanEmoji || cleanEmoji.length > 32) {
+      throw new BadRequestException('Geçersiz emoji');
+    }
+
+    const message = await this.prisma.message.findUnique({
+      where: { id: messageId },
+      select: { id: true, roomId: true, deletedAt: true },
+    });
+    if (!message || message.deletedAt) {
+      throw new NotFoundException('Mesaj bulunamadı');
+    }
+
+    await this.rooms.requireMembership(userId, message.roomId);
+
+    const existing = await this.prisma.messageReaction.findUnique({
+      where: {
+        messageId_userId: { messageId, userId },
+      },
+    });
+
+    if (existing && existing.emoji === cleanEmoji) {
+      await this.prisma.messageReaction.delete({
+        where: { id: existing.id },
+      });
+    } else if (existing) {
+      await this.prisma.messageReaction.update({
+        where: { id: existing.id },
+        data: { emoji: cleanEmoji, createdAt: new Date() },
+      });
+    } else {
+      await this.prisma.messageReaction.create({
+        data: {
+          messageId,
+          userId,
+          emoji: cleanEmoji,
+        },
+      });
+    }
+
+    const reactions = await this.prisma.messageReaction.findMany({
+      where: { messageId },
+      select: {
+        id: true,
+        messageId: true,
+        userId: true,
+        emoji: true,
+        createdAt: true,
+        user: {
+          select: {
+            id: true,
+            username: true,
+            displayName: true,
+            avatarUrl: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    const memberIds = await this.rooms.getMemberIds(message.roomId);
+    this.realtime.toUsers(memberIds, 'message_reaction', {
+      roomId: message.roomId,
+      messageId,
+      reactions,
+    });
+
+    return {
+      roomId: message.roomId,
+      messageId,
+      reactions,
+    };
   }
 }
