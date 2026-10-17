@@ -28,6 +28,16 @@ export class CallsController {
 
   constructor(private readonly chatGateway: ChatGateway) {}
 
+  @Post(':callId/accept')
+  @HttpCode(HttpStatus.OK)
+  async acceptCallParam(
+    @CurrentUser() user: AuthUser,
+    @Param('callId') callId: string,
+  ) {
+    this.logger.log(`[CallsController] POST /calls/${callId}/accept -> userId: ${user.id}`);
+    return this.chatGateway.acceptCall(user.id, callId);
+  }
+
   @Post(':callId/decline')
   @HttpCode(HttpStatus.OK)
   async declineCallParam(

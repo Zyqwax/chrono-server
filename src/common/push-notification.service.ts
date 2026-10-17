@@ -165,7 +165,7 @@ export class PushNotificationService {
         title: callerName,
         body: isVideo ? '📹 Gelen görüntülü arama...' : '📞 Gelen sesli arama...',
         categoryId: 'call',
-        interruptionLevel: 'time-sensitive',
+        interruptionLevel: 'active',
         data: {
           type: 'incoming_call',
           roomId,

@@ -645,13 +645,11 @@ export class ChatGateway
     };
   }
 
-  @SubscribeMessage('call_accept')
-  async handleCallAccept(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { callId: string },
-  ) {
-    const userId = client.data?.userId;
-    const call = this.calls.get(data?.callId);
+  /**
+   * Hem WebSocket hem REST API (arka plan bildirim aksiyonu) üzerinden çağrılabilen ortak arama kabul metodu.
+   */
+  async acceptCall(userId: string, callId: string, socketId?: string) {
+    const call = this.calls.get(callId);
     if (!call || call.calleeId !== userId || call.state !== 'ringing') {
       return { ok: false };
     }
@@ -662,7 +660,7 @@ export class ChatGateway
     const payload = await this.callPayload(call);
     this.realtime.toUsers([call.callerId, call.calleeId], 'call_accepted', {
       ...payload,
-      acceptedBySocket: client.id,
+      acceptedBySocket: socketId,
     });
 
     // Alıcı bu cihazdan cevapladı, diğer olası arka plan/cihaz bildirimlerini temizle
@@ -687,6 +685,15 @@ export class ChatGateway
       .catch(() => {});
 
     return { ok: true, call: payload };
+  }
+
+  @SubscribeMessage('call_accept')
+  async handleCallAccept(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { callId: string },
+  ) {
+    const userId = client.data?.userId;
+    return this.acceptCall(userId, data?.callId, client.id);
   }
 
   /**
